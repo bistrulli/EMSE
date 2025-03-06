@@ -12,8 +12,8 @@ if [ ! -d "$1" ]; then
     exit 1
 fi
 
-# Find all .c files recursively and calculate total size in bytes
-total_size=$(find "$1" -type f -name "*.c" -exec du -b {} + | awk '{sum += $1} END {print sum}')
+# Find all .c files recursively and sum their sizes in bytes
+total_size=$(find "$1" -type f -name "*.c" -printf "%s\n" | awk '{sum += $1} END {print sum}')
 
 # Print the total size in bytes
 if [ -n "$total_size" ]; then
