@@ -57,8 +57,19 @@ while IFS= read -r directory; do
     fi
     
     # Get the size using count_c_files.sh and convert to bytes
-    size=$(./count_c_files.sh "$full_path" | grep -oP '\d+\.?\d*' | head -n1)
-    unit=$(./count_c_files.sh "$full_path" | grep -oP '[KMG]B' | head -n1)
+    size_output=$(./count_c_files.sh "$full_path")
+    size=$(echo "$size_output" | grep -oP '\d+\.?\d*' | head -n1)
+    unit=$(echo "$size_output" | grep -oP '[KMG]B' | head -n1)
+    
+    # Skip if no valid size or unit
+    if [ -z "$size" ] || [ -z "$unit" ]; then
+        echo -e "\nDirectory: $directory"
+        echo "Size: No .c files found"
+        echo "-------------------"
+        ((current_dir++))
+        progress_bar $current_dir $total_dirs
+        continue
+    fi
     
     # Convert to bytes based on unit
     case $unit in
@@ -76,8 +87,10 @@ while IFS= read -r directory; do
             ;;
     esac
     
-    # Add to total
-    total_bytes=$(echo "$total_bytes + $size_bytes" | bc)
+    # Add to total only if we have a valid size
+    if [ ! -z "$size_bytes" ]; then
+        total_bytes=$(echo "$total_bytes + $size_bytes" | bc)
+    fi
     
     echo -e "\nDirectory: $directory"
     echo "Size: $size $unit"
@@ -88,9 +101,13 @@ while IFS= read -r directory; do
 done < "$1"
 
 echo -e "\n\nTotal size across all directories:"
-echo "$total_bytes" | awk '{ 
-    if ($1 < 1024) print $1 " B"
-    else if ($1 < 1024*1024) print $1/1024 " KB"
-    else if ($1 < 1024*1024*1024) print $1/(1024*1024) " MB"
-    else print $1/(1024*1024*1024) " GB"
-}' 
+if [ ! -z "$total_bytes" ]; then
+    echo "$total_bytes" | awk '{ 
+        if ($1 < 1024) print $1 " B"
+        else if ($1 < 1024*1024) print $1/1024 " KB"
+        else if ($1 < 1024*1024*1024) print $1/(1024*1024) " MB"
+        else print $1/(1024*1024*1024) " GB"
+    }'
+else
+    echo "0 B"
+fi 
