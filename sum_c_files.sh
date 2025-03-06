@@ -80,8 +80,8 @@ while IFS= read -r directory; do
         continue
     fi
     
-    # Get the size using count_c_files.sh
-    size_output=$(./count_c_files.sh "$full_path")
+    # Get the size using count_c_files.sh (passing only the directory name)
+    size_output=$(cd "../repos" && ./count_c_files.sh "$directory")
     
     # Extract size and unit from the output
     if [[ $size_output =~ ([0-9.]+)\s*([KMG]?B) ]]; then
