@@ -37,6 +37,30 @@ progress_bar() {
     printf "\rProgress: [%${completed}s%${remaining}s] %d%%" "" "" "$percentage"
 }
 
+# Function to convert human readable size to bytes
+convert_to_bytes() {
+    local size=$1
+    local unit=$2
+    
+    case $unit in
+        "B")
+            echo "$size"
+            ;;
+        "KB")
+            echo "$((size * 1024))"
+            ;;
+        "MB")
+            echo "$((size * 1024 * 1024))"
+            ;;
+        "GB")
+            echo "$((size * 1024 * 1024 * 1024))"
+            ;;
+        *)
+            echo "0"
+            ;;
+    esac
+}
+
 # Read each line from the file
 while IFS= read -r directory; do
     # Skip empty lines
@@ -56,45 +80,30 @@ while IFS= read -r directory; do
         continue
     fi
     
-    # Get the size using count_c_files.sh and convert to bytes
+    # Get the size using count_c_files.sh
     size_output=$(./count_c_files.sh "$full_path")
-    size=$(echo "$size_output" | grep -oP '\d+\.?\d*' | head -n1)
-    unit=$(echo "$size_output" | grep -oP '[KMG]B' | head -n1)
     
-    # Skip if no valid size or unit
-    if [ -z "$size" ] || [ -z "$unit" ]; then
+    # Extract size and unit from the output
+    if [[ $size_output =~ ([0-9.]+)\s*([KMG]?B) ]]; then
+        size=${BASH_REMATCH[1]}
+        unit=${BASH_REMATCH[2]}
+        
+        # Convert to bytes
+        size_bytes=$(convert_to_bytes "$size" "$unit")
+        
+        # Add to total
+        if [ $size_bytes -gt 0 ]; then
+            total_bytes=$((total_bytes + size_bytes))
+        fi
+        
+        echo -e "\nDirectory: $directory"
+        echo "Size: $size $unit"
+        echo "-------------------"
+    else
         echo -e "\nDirectory: $directory"
         echo "Size: No .c files found"
         echo "-------------------"
-        ((current_dir++))
-        progress_bar $current_dir $total_dirs
-        continue
     fi
-    
-    # Convert to bytes based on unit
-    case $unit in
-        "KB")
-            size_bytes=$(echo "$size * 1024" | bc | cut -d. -f1)
-            ;;
-        "MB")
-            size_bytes=$(echo "$size * 1024 * 1024" | bc | cut -d. -f1)
-            ;;
-        "GB")
-            size_bytes=$(echo "$size * 1024 * 1024 * 1024" | bc | cut -d. -f1)
-            ;;
-        *)
-            size_bytes=$size
-            ;;
-    esac
-    
-    # Add to total only if we have a valid size
-    if [ ! -z "$size_bytes" ] && [ "$size_bytes" != "0" ]; then
-        total_bytes=$((total_bytes + size_bytes))
-    fi
-    
-    echo -e "\nDirectory: $directory"
-    echo "Size: $size $unit"
-    echo "-------------------"
     
     ((current_dir++))
     progress_bar $current_dir $total_dirs
