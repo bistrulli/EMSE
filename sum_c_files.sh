@@ -57,12 +57,10 @@ while IFS= read -r directory; do
     fi
     
     # Get the size using count_c_files.sh
-    size=$(./count_c_files.sh "$full_path" | grep -oP '\d+\.?\d*' | head -n1)
+    size=$(./count_c_files.sh "$full_path")
     
-    if [ ! -z "$size" ]; then
-        # Convert decimal to integer by rounding
-        size_int=$(printf "%.0f" "$size")
-        total_bytes=$((total_bytes + size_int))
+    if [ "$size" != "0" ]; then
+        total_bytes=$((total_bytes + size))
         echo -e "\nDirectory: $directory"
         echo "Size: $size bytes"
         echo "-------------------"
