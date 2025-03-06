@@ -18,10 +18,6 @@ if [ ! -d "../repos" ]; then
     exit 1
 fi
 
-# Get the full path of count_c_files.sh
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-COUNT_SCRIPT="$SCRIPT_DIR/count_c_files.sh"
-
 # Initialize total size in bytes
 total_bytes=0
 
@@ -39,30 +35,6 @@ progress_bar() {
     local remaining=$((width - completed))
     
     printf "\rProgress: [%${completed}s%${remaining}s] %d%%" "" "" "$percentage"
-}
-
-# Function to convert human readable size to bytes
-convert_to_bytes() {
-    local size=$1
-    local unit=$2
-    
-    case $unit in
-        "B")
-            echo "$size"
-            ;;
-        "KB")
-            echo "$((size * 1024))"
-            ;;
-        "MB")
-            echo "$((size * 1024 * 1024))"
-            ;;
-        "GB")
-            echo "$((size * 1024 * 1024 * 1024))"
-            ;;
-        *)
-            echo "0"
-            ;;
-    esac
 }
 
 # Read each line from the file
@@ -84,24 +56,13 @@ while IFS= read -r directory; do
         continue
     fi
     
-    # Get the size using count_c_files.sh (passing only the directory name)
-    size_output=$(cd "../repos" && "$COUNT_SCRIPT" "$directory")
+    # Get the size using count_c_files.sh
+    size=$(./count_c_files.sh "$full_path" | grep -oP '\d+\.?\d*' | head -n1)
     
-    # Extract size and unit from the output
-    if [[ $size_output =~ ([0-9.]+)\s*([KMG]?B) ]]; then
-        size=${BASH_REMATCH[1]}
-        unit=${BASH_REMATCH[2]}
-        
-        # Convert to bytes
-        size_bytes=$(convert_to_bytes "$size" "$unit")
-        
-        # Add to total
-        if [ $size_bytes -gt 0 ]; then
-            total_bytes=$((total_bytes + size_bytes))
-        fi
-        
+    if [ ! -z "$size" ]; then
+        total_bytes=$((total_bytes + size))
         echo -e "\nDirectory: $directory"
-        echo "Size: $size $unit"
+        echo "Size: $size bytes"
         echo "-------------------"
     else
         echo -e "\nDirectory: $directory"
