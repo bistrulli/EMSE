@@ -12,6 +12,12 @@ if [ ! -f "$1" ]; then
     exit 1
 fi
 
+# Check if ../repos exists
+if [ ! -d "../repos" ]; then
+    echo "Error: '../repos' directory does not exist"
+    exit 1
+fi
+
 # Initialize total size in bytes
 total_bytes=0
 
@@ -39,17 +45,20 @@ while IFS= read -r directory; do
     # Remove any trailing whitespace
     directory=$(echo "$directory" | tr -d '[:space:]')
     
+    # Add ../repos prefix
+    full_path="../repos/$directory"
+    
     # Skip if directory doesn't exist
-    if [ ! -d "$directory" ]; then
-        echo -e "\nWarning: Directory '$directory' does not exist, skipping..."
+    if [ ! -d "$full_path" ]; then
+        echo -e "\nWarning: Directory '$full_path' does not exist, skipping..."
         ((current_dir++))
         progress_bar $current_dir $total_dirs
         continue
     fi
     
     # Get the size using count_c_files.sh and convert to bytes
-    size=$(./count_c_files.sh "$directory" | grep -oP '\d+\.?\d*' | head -n1)
-    unit=$(./count_c_files.sh "$directory" | grep -oP '[KMG]B' | head -n1)
+    size=$(./count_c_files.sh "$full_path" | grep -oP '\d+\.?\d*' | head -n1)
+    unit=$(./count_c_files.sh "$full_path" | grep -oP '[KMG]B' | head -n1)
     
     # Convert to bytes based on unit
     case $unit in
