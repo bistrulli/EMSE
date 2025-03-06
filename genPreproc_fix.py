@@ -82,6 +82,7 @@ def get_all_project_headers(project_path: str):
         )
     except subprocess.CalledProcessError:
         result = ""
+    
     # Otteniamo i percorsi delle directory in cui si trovano gli header
     header_dirs = {str(Path(header).parent) for header in result.splitlines() if header}
     
@@ -89,24 +90,34 @@ def get_all_project_headers(project_path: str):
     system_headers = {
         "/usr/include",
         "/usr/local/include",
-        "/opt/include",
-        "/usr/include/X11",
-        "/usr/include/asm",
         "/usr/include/linux",
-        "usr/include/ncurses"
-    }
-    
-    # Directory specifiche per ESP32 e LVGL
-    esp32_headers = {
-        # Aggiungi qui i percorsi delle directory che contengono gli header di LVGL
-        # Per esempio:
-        # "/path/to/lvgl/include",
-        # "/path/to/esp32/include"
+        "/usr/include/asm"
     }
     
     # Unisci tutte le directory
-    header_dirs = header_dirs.union(system_headers).union(esp32_headers)
-    return list(header_dirs)
+    header_dirs = header_dirs.union(system_headers)
+    
+    # Convertiamo in lista e limitiamo il numero di directory
+    header_list = list(header_dirs)
+    
+    # Se abbiamo troppe directory, prendiamo solo quelle più rilevanti
+    MAX_DIRS = 50  # Limite massimo di directory
+    if len(header_list) > MAX_DIRS:
+        # Manteniamo le directory di sistema
+        system_dirs = [d for d in header_list if d in system_headers]
+        
+        # Per le altre directory, prendiamo quelle più vicine alla root del progetto
+        project_dirs = [d for d in header_list if d not in system_headers]
+        project_dirs.sort(key=lambda x: len(x.split('/')))  # Ordina per profondità
+        
+        # Prendiamo le prime N directory del progetto
+        remaining_slots = MAX_DIRS - len(system_dirs)
+        header_list = system_dirs + project_dirs[:remaining_slots]
+        
+        # Log del numero di directory rimosse
+        print(f"Warning: Rimosse {len(header_list) - MAX_DIRS} directory di include per evitare il limite di argomenti")
+    
+    return header_list
 
 
 # ------------------------------------------------------------------------------
@@ -127,15 +138,13 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
     base_name = Path(c_file).with_suffix('').name
     out_file = Path(dest_folder) / f"{base_name}_{include_id}.i"
     err_file = Path(dest_folder) / f"{base_name}_{include_id}.err"
-    resp_file = Path(dest_folder) / f"{base_name}_{include_id}.resp"
 
-    # Creiamo il file di risposta con le directory di include
-    with open(resp_file, 'w') as f:
-        for inc in include_dirs:
-            f.write(f"-I{inc}\n")
-
-    # Costruiamo il comando cpp usando il file di risposta
-    cmd = ['cpp', f'@{resp_file}', c_file]
+    # Costruiamo il comando cpp con le directory di include
+    cmd = ['cpp', c_file]
+    
+    # Aggiungiamo le directory di include in gruppi
+    for inc in include_dirs:
+        cmd.extend(['-I', inc])
     
     # Aggiungiamo flag di debug per cpp
     cmd.extend(['-v', '-dD'])
@@ -148,9 +157,6 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
                               stdout=subprocess.PIPE, 
                               stderr=subprocess.PIPE,
                               text=True)
-        
-        # Rimuoviamo il file di risposta
-        resp_file.unlink(missing_ok=True)
         
         # Scriviamo l'output e gli errori nei file
         with open(out_file, 'w') as fout:
@@ -186,9 +192,6 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
             return True
             
     except subprocess.CalledProcessError as e:
-        # Rimuoviamo il file di risposta in caso di errore
-        resp_file.unlink(missing_ok=True)
-        
         log_message(f"\nErrore nell'esecuzione del comando per {c_file}:", dest_folder)
         log_message(f"Exit code: {e.returncode}", dest_folder)
         log_message(f"Output: {e.output}", dest_folder)
