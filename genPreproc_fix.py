@@ -122,28 +122,57 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
     for inc in include_dirs:
         cmd.extend(['-I', inc])
     
+    # Aggiungiamo flag di debug per cpp
+    cmd.extend(['-v', '-dD'])
+    
     start_time = time.time()
-    with open(out_file, 'w') as fout, open(err_file, 'w') as ferr:
-        subprocess.run(cmd, stdout=fout, stderr=ferr)
-    duration = time.time() - start_time
+    
+    # Eseguiamo il comando e catturiamo l'output
+    try:
+        result = subprocess.run(cmd, 
+                              stdout=subprocess.PIPE, 
+                              stderr=subprocess.PIPE,
+                              text=True)
+        
+        # Scriviamo l'output e gli errori nei file
+        with open(out_file, 'w') as fout:
+            fout.write(result.stdout)
+        with open(err_file, 'w') as ferr:
+            ferr.write(result.stderr)
+            
+        duration = time.time() - start_time
 
-    # Se il file di errori contiene messaggi di include mancanti, consideriamo il preprocessing fallito
-    if err_file.stat().st_size > 0:
-        with open(err_file, 'r') as f:
-            error_content = f.read()
-        if '#include' in error_content:
-            # Rimuoviamo i file generati se ci sono errori critici
-            out_file.unlink(missing_ok=True)
-            err_file.unlink(missing_ok=True)
-            log_message(f"ERROR: Preprocessing di {c_file} fallito.\nComando: {' '.join(cmd)}\nDurata: {duration:.2f} sec", dest_folder)
-            return False
+        # Se ci sono errori, mostriamoli
+        if result.stderr:
+            print(f"\nErrori per {c_file}:")
+            print(result.stderr)
+            print("-" * 80)
+            
+        # Se il file di errori contiene messaggi di include mancanti, consideriamo il preprocessing fallito
+        if err_file.stat().st_size > 0:
+            with open(err_file, 'r') as f:
+                error_content = f.read()
+            if '#include' in error_content:
+                # Rimuoviamo i file generati se ci sono errori critici
+                out_file.unlink(missing_ok=True)
+                err_file.unlink(missing_ok=True)
+                log_message(f"ERROR: Preprocessing di {c_file} fallito.\nComando: {' '.join(cmd)}\nDurata: {duration:.2f} sec", dest_folder)
+                return False
+            else:
+                log_message(f"WARNING: Preprocessing di {c_file} completato con avvisi.\nComando: {' '.join(cmd)}\nDurata: {duration:.2f} sec", dest_folder)
+                return True
         else:
-            log_message(f"WARNING: Preprocessing di {c_file} completato con avvisi.\nComando: {' '.join(cmd)}\nDurata: {duration:.2f} sec", dest_folder)
+            log_message(f"COMPLETED: Preprocessing di {c_file} riuscito.\nComando: {' '.join(cmd)}\nDurata: {duration:.2f} sec", dest_folder)
+            err_file.unlink(missing_ok=True)  # rimuoviamo il file degli errori se vuoto
             return True
-    else:
-        log_message(f"COMPLETED: Preprocessing di {c_file} riuscito.\nComando: {' '.join(cmd)}\nDurata: {duration:.2f} sec", dest_folder)
-        err_file.unlink(missing_ok=True)  # rimuoviamo il file degli errori se vuoto
-        return True
+            
+    except subprocess.CalledProcessError as e:
+        print(f"\nErrore nell'esecuzione del comando per {c_file}:")
+        print(f"Exit code: {e.returncode}")
+        print(f"Output: {e.output}")
+        print(f"Error: {e.stderr}")
+        print("-" * 80)
+        return False
 
 
 # ------------------------------------------------------------------------------
