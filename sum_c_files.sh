@@ -15,6 +15,22 @@ fi
 # Initialize total size in bytes
 total_bytes=0
 
+# Count total number of directories (excluding empty lines)
+total_dirs=$(grep -c '[^[:space:]]' "$1")
+current_dir=0
+
+# Function to display progress bar
+progress_bar() {
+    local current=$1
+    local total=$2
+    local width=50
+    local percentage=$((current * 100 / total))
+    local completed=$((current * width / total))
+    local remaining=$((width - completed))
+    
+    printf "\rProgress: [%${completed}s%${remaining}s] %d%%" "" "" "$percentage"
+}
+
 # Read each line from the file
 while IFS= read -r directory; do
     # Skip empty lines
@@ -25,7 +41,9 @@ while IFS= read -r directory; do
     
     # Skip if directory doesn't exist
     if [ ! -d "$directory" ]; then
-        echo "Warning: Directory '$directory' does not exist, skipping..."
+        echo -e "\nWarning: Directory '$directory' does not exist, skipping..."
+        ((current_dir++))
+        progress_bar $current_dir $total_dirs
         continue
     fi
     
@@ -52,13 +70,15 @@ while IFS= read -r directory; do
     # Add to total
     total_bytes=$(echo "$total_bytes + $size_bytes" | bc)
     
-    echo "Directory: $directory"
+    echo -e "\nDirectory: $directory"
     echo "Size: $size $unit"
     echo "-------------------"
+    
+    ((current_dir++))
+    progress_bar $current_dir $total_dirs
 done < "$1"
 
-# Convert total bytes to human readable format
-echo "Total size across all directories:"
+echo -e "\n\nTotal size across all directories:"
 echo "$total_bytes" | awk '{ 
     if ($1 < 1024) print $1 " B"
     else if ($1 < 1024*1024) print $1/1024 " KB"
