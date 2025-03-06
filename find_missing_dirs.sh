@@ -26,7 +26,8 @@ echo "----------------------------------------"
 
 # Find all directories in ../repos and save those not in the input file
 find "../repos" -maxdepth 1 -mindepth 1 -type d -exec basename {} \; | while read dir; do
-    if ! grep -q "^$dir$" "$1"; then
+    # Check if directory name exists in input file (with or without trailing slash)
+    if ! grep -q "^$dir/\?$" "$1"; then
         echo "$dir" >> "$output_file"
     fi
 done
