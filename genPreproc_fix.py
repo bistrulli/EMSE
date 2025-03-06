@@ -138,13 +138,9 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
     base_name = Path(c_file).with_suffix('').name
     out_file = Path(dest_folder) / f"{base_name}_{include_id}.i"
     err_file = Path(dest_folder) / f"{base_name}_{include_id}.err"
-
-    # Costruiamo il comando cpp con le directory di include
-    cmd = ['cpp', c_file]
     
-    # Aggiungiamo le directory di include in gruppi
-    for inc in include_dirs:
-        cmd.extend(['-I', inc])
+    # Costruiamo il comando cpp usando la directory temporanea
+    cmd = ['cpp', '-I', include_dirs[0], c_file]
     
     # Aggiungiamo flag di debug per cpp
     cmd.extend(['-v', '-dD'])
@@ -274,16 +270,34 @@ def main():
     # Raccogliamo tutte le directory degli header dal progetto e di sistema
     header_dirs = get_all_project_headers(str(project_dir))
 
-    print(f"Trovati {total_files} file C. Avvio del preprocessing...")
-    start_time = time.time()
-    # Elaborazione di ogni file C
-    for idx, c_file in enumerate(c_files, start=1):
-        print_progress_bar(idx, total_files, prefix="Preprocessing:", suffix=project_dir.name)
-        preprocess_file(c_file, header_dirs, str(dest_folder), idx)
-    # Log finale con il tempo totale impiegato
-    end_time = time.time()
-    log_message("-------------", str(dest_folder))
-    log_message(f"Tempo totale: {end_time - start_time:.2f} secondi", str(dest_folder))
+    # Creiamo una singola directory temporanea per tutti i file
+    temp_include_dir = Path(dest_folder) / "temp_includes"
+    temp_include_dir.mkdir(exist_ok=True)
+    
+    try:
+        # Creiamo i link simbolici una sola volta per tutti i file
+        for idx, inc_dir in enumerate(header_dirs):
+            link_name = f"inc_{idx}"
+            link_path = temp_include_dir / link_name
+            os.symlink(inc_dir, link_path)
+
+        print(f"Trovati {total_files} file C. Avvio del preprocessing...")
+        start_time = time.time()
+        # Elaborazione di ogni file C
+        for idx, c_file in enumerate(c_files, start=1):
+            print_progress_bar(idx, total_files, prefix="Preprocessing:", suffix=project_dir.name)
+            preprocess_file(c_file, [str(temp_include_dir)], str(dest_folder), idx)
+        # Log finale con il tempo totale impiegato
+        end_time = time.time()
+        log_message("-------------", str(dest_folder))
+        log_message(f"Tempo totale: {end_time - start_time:.2f} secondi", str(dest_folder))
+        
+    finally:
+        # Puliamo la directory temporanea alla fine
+        try:
+            shutil.rmtree(temp_include_dir)
+        except Exception as e:
+            log_message(f"Warning: Impossibile rimuovere la directory temporanea {temp_include_dir}: {e}", dest_folder)
 
 
 if __name__ == '__main__':
