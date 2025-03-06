@@ -18,6 +18,10 @@ if [ ! -d "../repos" ]; then
     exit 1
 fi
 
+# Get the full path of count_c_files.sh
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+COUNT_SCRIPT="$SCRIPT_DIR/count_c_files.sh"
+
 # Initialize total size in bytes
 total_bytes=0
 
@@ -81,7 +85,7 @@ while IFS= read -r directory; do
     fi
     
     # Get the size using count_c_files.sh (passing only the directory name)
-    size_output=$(cd "../repos" && ./count_c_files.sh "$directory")
+    size_output=$(cd "../repos" && "$COUNT_SCRIPT" "$directory")
     
     # Extract size and unit from the output
     if [[ $size_output =~ ([0-9.]+)\s*([KMG]?B) ]]; then
