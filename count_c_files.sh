@@ -12,18 +12,12 @@ if [ ! -d "$1" ]; then
     exit 1
 fi
 
-# Find all .c files recursively and calculate total size
+# Find all .c files recursively and calculate total size in bytes
 total_size=$(find "$1" -type f -name "*.c" -exec du -b {} + | awk '{sum += $1} END {print sum}')
 
-# Convert bytes to human readable format
+# Print the total size in bytes
 if [ -n "$total_size" ]; then
-    echo "Total size of .c files in $1 and subdirectories:"
-    echo "$total_size" | awk '{ 
-        if ($1 < 1024) print $1 " B"
-        else if ($1 < 1024*1024) print $1/1024 " KB"
-        else if ($1 < 1024*1024*1024) print $1/(1024*1024) " MB"
-        else print $1/(1024*1024*1024) " GB"
-    }'
+    echo "$total_size"
 else
-    echo "No .c files found in $1 and subdirectories"
+    echo "0"
 fi 
