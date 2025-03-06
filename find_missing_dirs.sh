@@ -18,10 +18,10 @@ if [ ! -d "../repos" ]; then
     exit 1
 fi
 
-# Get all directories in ../repos
-repos_dirs=$(find "../repos" -maxdepth 1 -mindepth 1 -type d -exec basename {} \;)
+# Get all directories in ../repos with full paths
+repos_dirs=$(find "../repos" -maxdepth 1 -mindepth 1 -type d)
 
-# Read the input file and create a list of directories
+# Read the input file and create a list of directory names
 input_dirs=$(cat "$1" | tr -d '[:space:]')
 
 # Function to display progress bar
@@ -51,13 +51,16 @@ echo "----------------------------------------"
 > "$output_file"
 
 # Check each directory in repos
-echo "$repos_dirs" | while IFS= read -r dir; do
-    # Skip empty lines
-    [ -z "$dir" ] && continue
+echo "$repos_dirs" | while IFS= read -r full_path; do
+    # Get just the directory name without the path
+    dir_name=$(basename "$full_path")
     
-    # Check if directory is in the input file
-    if ! echo "$input_dirs" | grep -q "^$dir$"; then
-        echo "$dir" >> "$output_file"
+    # Skip empty lines
+    [ -z "$dir_name" ] && continue
+    
+    # Check if directory name is in the input file
+    if ! echo "$input_dirs" | grep -q "^$dir_name$"; then
+        echo "$dir_name" >> "$output_file"
         ((missing_dirs++))
     fi
     
