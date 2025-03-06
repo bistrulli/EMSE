@@ -22,9 +22,9 @@ import argparse
 from pathlib import Path
 
 # Impostazioni globali
-VERBOSE = False
+VERBOSE = True
 SAVE_LOGS = True
-PRINT_LOGS = False
+PRINT_LOGS = True
 LOG_FILENAME = 'preproc.log'
 PREPROC_DIR = 'preprocessed_bug'
 HOME_DIR = '/workspace/EMSE'
