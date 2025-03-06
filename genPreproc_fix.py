@@ -127,11 +127,15 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
     base_name = Path(c_file).with_suffix('').name
     out_file = Path(dest_folder) / f"{base_name}_{include_id}.i"
     err_file = Path(dest_folder) / f"{base_name}_{include_id}.err"
+    resp_file = Path(dest_folder) / f"{base_name}_{include_id}.resp"
 
-    # Costruiamo il comando cpp aggiungendo i flag -I per ogni directory di include
-    cmd = ['cpp', c_file]
-    for inc in include_dirs:
-        cmd.extend(['-I', inc])
+    # Creiamo il file di risposta con le directory di include
+    with open(resp_file, 'w') as f:
+        for inc in include_dirs:
+            f.write(f"-I{inc}\n")
+
+    # Costruiamo il comando cpp usando il file di risposta
+    cmd = ['cpp', f'@{resp_file}', c_file]
     
     # Aggiungiamo flag di debug per cpp
     cmd.extend(['-v', '-dD'])
@@ -144,6 +148,9 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
                               stdout=subprocess.PIPE, 
                               stderr=subprocess.PIPE,
                               text=True)
+        
+        # Rimuoviamo il file di risposta
+        resp_file.unlink(missing_ok=True)
         
         # Scriviamo l'output e gli errori nei file
         with open(out_file, 'w') as fout:
@@ -179,6 +186,9 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
             return True
             
     except subprocess.CalledProcessError as e:
+        # Rimuoviamo il file di risposta in caso di errore
+        resp_file.unlink(missing_ok=True)
+        
         log_message(f"\nErrore nell'esecuzione del comando per {c_file}:", dest_folder)
         log_message(f"Exit code: {e.returncode}", dest_folder)
         log_message(f"Output: {e.output}", dest_folder)
