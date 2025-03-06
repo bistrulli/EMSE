@@ -74,13 +74,13 @@ while IFS= read -r directory; do
     # Convert to bytes based on unit
     case $unit in
         "KB")
-            size_bytes=$(echo "$size * 1024" | bc)
+            size_bytes=$(echo "$size * 1024" | bc | cut -d. -f1)
             ;;
         "MB")
-            size_bytes=$(echo "$size * 1024 * 1024" | bc)
+            size_bytes=$(echo "$size * 1024 * 1024" | bc | cut -d. -f1)
             ;;
         "GB")
-            size_bytes=$(echo "$size * 1024 * 1024 * 1024" | bc)
+            size_bytes=$(echo "$size * 1024 * 1024 * 1024" | bc | cut -d. -f1)
             ;;
         *)
             size_bytes=$size
@@ -88,8 +88,8 @@ while IFS= read -r directory; do
     esac
     
     # Add to total only if we have a valid size
-    if [ ! -z "$size_bytes" ]; then
-        total_bytes=$(echo "$total_bytes + $size_bytes" | bc)
+    if [ ! -z "$size_bytes" ] && [ "$size_bytes" != "0" ]; then
+        total_bytes=$((total_bytes + size_bytes))
     fi
     
     echo -e "\nDirectory: $directory"
@@ -101,13 +101,16 @@ while IFS= read -r directory; do
 done < "$1"
 
 echo -e "\n\nTotal size across all directories:"
-if [ ! -z "$total_bytes" ]; then
-    echo "$total_bytes" | awk '{ 
-        if ($1 < 1024) print $1 " B"
-        else if ($1 < 1024*1024) print $1/1024 " KB"
-        else if ($1 < 1024*1024*1024) print $1/(1024*1024) " MB"
-        else print $1/(1024*1024*1024) " GB"
-    }'
+if [ $total_bytes -gt 0 ]; then
+    if [ $total_bytes -lt 1024 ]; then
+        echo "$total_bytes B"
+    elif [ $total_bytes -lt $((1024 * 1024)) ]; then
+        echo "$((total_bytes / 1024)) KB"
+    elif [ $total_bytes -lt $((1024 * 1024 * 1024)) ]; then
+        echo "$((total_bytes / (1024 * 1024))) MB"
+    else
+        echo "$((total_bytes / (1024 * 1024 * 1024))) GB"
+    fi
 else
     echo "0 B"
 fi 
