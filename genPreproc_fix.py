@@ -84,6 +84,7 @@ def get_all_project_headers(project_path: str):
         result = ""
     # Otteniamo i percorsi delle directory in cui si trovano gli header
     header_dirs = {str(Path(header).parent) for header in result.splitlines() if header}
+    
     # Directory di header di sistema (aggiunte manualmente)
     system_headers = {
         "/usr/include",
@@ -94,7 +95,17 @@ def get_all_project_headers(project_path: str):
         "/usr/include/linux",
         "usr/include/ncurses"
     }
-    header_dirs = header_dirs.union(system_headers)
+    
+    # Directory specifiche per ESP32 e LVGL
+    esp32_headers = {
+        # Aggiungi qui i percorsi delle directory che contengono gli header di LVGL
+        # Per esempio:
+        # "/path/to/lvgl/include",
+        # "/path/to/esp32/include"
+    }
+    
+    # Unisci tutte le directory
+    header_dirs = header_dirs.union(system_headers).union(esp32_headers)
     return list(header_dirs)
 
 
@@ -142,11 +153,12 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
             
         duration = time.time() - start_time
 
-        # Se ci sono errori, mostriamoli
+        # Se ci sono errori, scriviamoli nel file di log
         if result.stderr:
-            print(f"\nErrori per {c_file}:")
-            print(result.stderr)
-            print("-" * 80)
+            log_message(f"\nErrori dettagliati per {c_file}:", dest_folder)
+            log_message("-" * 80, dest_folder)
+            log_message(result.stderr, dest_folder)
+            log_message("-" * 80, dest_folder)
             
         # Se il file di errori contiene messaggi di include mancanti, consideriamo il preprocessing fallito
         if err_file.stat().st_size > 0:
@@ -167,11 +179,11 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
             return True
             
     except subprocess.CalledProcessError as e:
-        print(f"\nErrore nell'esecuzione del comando per {c_file}:")
-        print(f"Exit code: {e.returncode}")
-        print(f"Output: {e.output}")
-        print(f"Error: {e.stderr}")
-        print("-" * 80)
+        log_message(f"\nErrore nell'esecuzione del comando per {c_file}:", dest_folder)
+        log_message(f"Exit code: {e.returncode}", dest_folder)
+        log_message(f"Output: {e.output}", dest_folder)
+        log_message(f"Error: {e.stderr}", dest_folder)
+        log_message("-" * 80, dest_folder)
         return False
 
 
