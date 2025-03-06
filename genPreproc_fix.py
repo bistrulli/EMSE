@@ -123,10 +123,10 @@ def preprocess_file(c_file: str, include_dirs: list, dest_folder: str, include_i
     :param include_id: identificatore progressivo per generare nomi univoci dei file
     :return: True se il preprocessing è andato a buon fine, False altrimenti
     """
-    # Costruiamo i nomi dei file di output
+    # Costruiamo i nomi dei file di output nella cartella del progetto
     base_name = Path(c_file).with_suffix('').name
-    out_file = Path(HOME_DIR) / PREPROC_DIR / f"{base_name}_{include_id}.i"
-    err_file = Path(HOME_DIR) / PREPROC_DIR / f"{base_name}_{include_id}.err"
+    out_file = Path(dest_folder) / f"{base_name}_{include_id}.i"
+    err_file = Path(dest_folder) / f"{base_name}_{include_id}.err"
 
     # Costruiamo il comando cpp aggiungendo i flag -I per ogni directory di include
     cmd = ['cpp', c_file]
