@@ -73,51 +73,56 @@ def removeIfLink(filepaths):
 
 
 def getInputs(params):
-
-	# Check the first input is a directory
-	if not os.path.isdir(params[1]):
-		print('The first parameter must be a directory')
-		sys.exit(-1)
-	else:
-		if params[1][-1] != '/':
-			path = params[1] + '/'
-		else:
-			path = params[1]
-			
-	# Check the second input (only if it is provided)
-	if len(params) == 3:
-		if not (os.path.isdir(params[2]) or os.path.isfile(params[2])):
-			print('If provided, the second parameter must be a file or a directory')
-			sys.exit(-1)
-		elif os.path.isfile(params[2]):
-			if params[2][-2:] == '.c':
-				cFiles = [params[2]]
-			else:
-				print('If the second parameter is a file, then it must be a C file')
-				sys.exit(-1)
-		else:
-			if params[2][-1] != '/':
-				#cFiles = glob.glob(params[2] + '/**/*.c', recursive=True)
-				proc = subprocess.Popen(['find', params[2], '-name', '*.c'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-				cFiles, _ = proc.communicate()
-				cFiles = cFiles.decode('utf-8', errors='ignore').split('\n')
-				if cFiles[-1] == '':
-					cFiles = cFiles[:-1]
-			else:
-				#cFiles = glob.glob(params[2] + '**/*.c', recursive=True)
-				proc = subprocess.Popen(['find', params[2] + '/', '-name', '*.c'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-				cFiles, _ = proc.communicate()
-				cFiles = cFiles.decode('utf-8', errors='ignore').split('\n')
-				if cFiles[-1] == '':
-					cFiles = cFiles[:-1]
-	else:
-		#cFiles = glob.glob(path + '**/*.c', recursive=True)
-		proc = subprocess.Popen(['find', path, '-name', '*.c'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		cFiles, _ = proc.communicate()
-		cFiles = cFiles.decode('utf-8', errors='ignore').split('\n')
-		if cFiles[-1] == '':
-			cFiles = cFiles[:-1]
-	return path, removeIfLink(cFiles)
+    # Verify that the first parameter is a directory.
+    if not os.path.isdir(params[1]):
+        # Print an error message and exit if the first parameter is not a valid directory.
+        print('The first parameter must be a directory')
+        sys.exit(-1)
+    else:
+        # Ensure the directory path ends with a '/'.
+        if params[1][-1] != '/':
+            path = params[1] + '/'
+        else:
+            path = params[1]
+            
+    # Check if a second parameter is provided.
+    if len(params) == 3:
+        # Verify that the second parameter is either a directory or a file.
+        if not (os.path.isdir(params[2]) or os.path.isfile(params[2])):
+            print('If provided, the second parameter must be a file or a directory')
+            sys.exit(-1)
+        elif os.path.isfile(params[2]):
+            # If it's a file, ensure it is a C file by checking its extension.
+            if params[2][-2:] == '.c':
+                cFiles = [params[2]]
+            else:
+                print('If the second parameter is a file, then it must be a C file')
+                sys.exit(-1)
+        else:
+            # If the second parameter is a directory, check if the path ends with '/'.
+            if params[2][-1] != '/':
+                # Use 'find' to search for .c files in the provided directory.
+                proc = subprocess.Popen(['find', params[2], '-name', '*.c'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                cFiles, _ = proc.communicate()
+                cFiles = cFiles.decode('utf-8', errors='ignore').split('\n')
+                if cFiles[-1] == '':
+                    cFiles = cFiles[:-1]
+            else:
+                # If the directory path ends with '/', use a similar 'find' command.
+                proc = subprocess.Popen(['find', params[2] + '/', '-name', '*.c'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                cFiles, _ = proc.communicate()
+                cFiles = cFiles.decode('utf-8', errors='ignore').split('\n')
+                if cFiles[-1] == '':
+                    cFiles = cFiles[:-1]
+    else:
+        # If no second parameter is provided, search for .c files in the main directory.
+        proc = subprocess.Popen(['find', path, '-name', '*.c'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cFiles, _ = proc.communicate()
+        cFiles = cFiles.decode('utf-8', errors='ignore').split('\n')
+        if cFiles[-1] == '':
+            cFiles = cFiles[:-1]
+    # Return the main directory path and the list of C files after removing symlinks.
+    return path, removeIfLink(cFiles)
 	
 
 
@@ -232,76 +237,94 @@ def exploreDependenciesTreeBFS(path, filepath, deps=list()):
 	
 	
 def allHeadersExist(filepath):
-	headers = getDependencies(filepath)
-	for header in headers:
-		header = header.replace('[space_tag]', ' ')
-		headerpaths = glob.glob(path + '**/' + header, recursive=True)
-		headerpaths = removeIfLink(headerpaths)
-		if len(headerpaths) == 0:
-				return False, header
-	return True, None
-#	with open(filepath, 'r') as f:
-#		lines = f.readlines()
-#	for line in lines:
-#		if '#include' in line:
-#			if '"' in line:
-#		 		header = line.split('"')[1]
-#			elif '<' in line:
-#		 		header = line.split('<')[1].split('>')[0]
-#			headerpaths = glob.glob(path + '**/' + header, recursive=True)
-#			if len(headerpaths) == 0:
-#				return False, header
-#	return True, None
-	
-	
+    # Retrieve the list of headers required by the file using getDependencies.
+    headers = getDependencies(filepath)
+    for header in headers:
+        # Replace placeholder for space with an actual space.
+        header = header.replace('[space_tag]', ' ')
+        # Search for the header file within the directory tree.
+        headerpaths = glob.glob(path + '**/' + header, recursive=True)
+        # Remove any paths that are symbolic links or directories.
+        headerpaths = removeIfLink(headerpaths)
+        # If no valid header file is found, return False with the missing header name.
+        if len(headerpaths) == 0:
+            return False, header
+    # If all headers are found, return True and None for the missing header.
+    return True, None
+
+def parseDependencyError(err_decoded):
+    """
+    Refactored function to parse the missing dependency from a cpp error message.
+    It returns the name of the missing header.
+    """
+    import re
+    err_decoded = err_decoded.strip()
+    # Try to match user-defined includes ("header.h") or system includes (<header.h>).
+    match = re.search(r'#include\s+[<"]([^">]+)[">]', err_decoded)
+    if match:
+        return match.group(1)
+    else:
+        print('[DEBUG] Could not find the library name in:', err_decoded)
+        sys.exit(-1)
+
 def exploreDependenciesTreeDFS(path, cFilePath, destFolder, deps=list()):
-	keepGoing = True
-	if len(deps) == 0:
-		keepGoing, missingHeader = allHeadersExist(cFilePath)
-	if keepGoing:
-		cmdList = ['cpp', '-M', cFilePath]
-		for dep in deps:
-			cmdList += ['-I', dep]
-		printDebug('[DEBUG] Dependencies: ' + ' '.join(cmdList), VERBOSE)
-		proc = subprocess.Popen(cmdList, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		_, err = proc.communicate()
-		errStr = err.decode('utf-8', errors='ignore')
-		if '#include' in errStr:
-			for line in errStr.split('\n'):
-				if '#include' in line:
-					deppaths = None;
-					if '"' in line:
-						# case user defined include
-						newDep = line.split('"')[1]
-						filepath = '/'.join(cFilePath.split('/')[:-1])
-						#deppaths = glob.glob(filepath + '/' + newDep, recursive=False);
-						deppaths=[]
-					if deppaths is None:
-						#system defined include
-						if '<' in line:
-							newDep = line.split('<')[1].split('>')[0]
-						#deppaths = glob.glob(path + '**/' + newDep, recursive=True)
-						deppaths=[]
-						#print('<>', newDep, deppaths)
-					elif len(deppaths) == 0:
-						pass
-						#deppaths = glob.glob(path + '**/' + newDep, recursive=True)
-						#print('<>', newDep, deppaths)
-					deppaths = removeIfLink(deppaths);
-					for deppath in deppaths:
-						keepGoing, missingHeader = allHeadersExist(deppath)
-						if keepGoing:
-							deppath = deppath[:-len(newDep)]
-							#deppath = deppath.replace(newDep, '')
-							printDebug('[DEBUG PATH] ' + newDep + ' is in ' + deppath, VERBOSE)
-							stop = exploreDependenciesTreeDFS(path, cFilePath, destFolder, deps=deps+[deppath])
-							if stop:
-								return True
-						else:
-							printAndSave('ERROR,' + cFilePath + ':' + deppath + ',' + 'Missing ' + missingHeader + ',', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
-		return preprocAndStop(cFilePath, deps, 0, destFolder)
-	else:
-		printAndSave('ERROR,' + cFilePath + ',' + 'Missing ' + missingHeader + ',', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
+    # Check if the initial dependencies are provided. If not, verify if the cFile has all required headers.
+    keepGoing = True
+    if len(deps) == 0:
+        # If deps is empty, check if cFilePath contains all necessary headers.
+        keepGoing, missingHeader = allHeadersExist(cFilePath)
+    if keepGoing:
+        # Build the command list for invoking the 'cpp' preprocessor.
+        cmdList = ['cpp', '-M', cFilePath]
+        for dep in deps:
+            # Append each dependency as a -I parameter to include the specified paths.
+            cmdList += ['-I', dep]
+        # Debug: Display the command parameters passed to cpp.
+        printDebug('[DEBUG] Dependencies: ' + ' '.join(cmdList), VERBOSE)
+        proc = subprocess.Popen(cmdList, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _, err = proc.communicate()
+        errStr = err.decode('utf-8', errors='ignore')
+        if '#include' in errStr:
+            # If cpp reports problems with #include directives, analyze each line of the error output.
+            for line in errStr.split('\n'):
+                if '#include' in line:
+                    deppaths = None
+                    if '"' in line:
+                        # Case: user-defined include (quotes).
+                        newDep = line.split('"')[1]
+                        filepath = '/'.join(cFilePath.split('/')[:-1])
+                        # In this example, you may look for the corresponding path.
+                        deppaths = []
+                    if deppaths is None:
+                        # Case: system include (angles), extract the library name.
+                        if '<' in line:
+                            newDep = line.split('<')[1].split('>')[0]
+                        deppaths = []
+                    elif len(deppaths) == 0:
+                        # No path found for the new include.
+                        pass
+                    # Clean invalid paths (e.g., symbolic links).
+                    deppaths = removeIfLink(deppaths)
+                    for deppath in deppaths:
+                        # Check if the found path contains all required headers.
+                        keepGoing, missingHeader = allHeadersExist(deppath)
+                        if keepGoing:
+                            # Remove the new header name from the string to obtain just the path.
+                            deppath = deppath[:-len(newDep)]
+                            # Debug: Report in which path the header was found.
+                            printDebug('[DEBUG PATH] ' + newDep + ' is in ' + deppath, VERBOSE)
+                            # Recursively call the function, adding the new path to the dependencies.
+                            stop = exploreDependenciesTreeDFS(path, cFilePath, destFolder, deps=deps+[deppath])
+                            if stop:
+                                return True
+                        else:
+                            # If a header is missing, log the error.
+                            printAndSave('ERROR,' + cFilePath + ':' + deppath + ',' + 'Missing ' + missingHeader + ',', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
+        # Finally, perform the actual preprocessing and stop further exploration.
+        return preprocAndStop(cFilePath, deps, 0, destFolder)
+    else:
+        # If not all headers are present, log the error and exit the function.
+        printAndSave('ERROR,' + cFilePath + ',' + 'Missing ' + missingHeader + ',', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
 		
 	
 	
@@ -387,8 +410,6 @@ def preprocAndStop(cFile, includes, include_id, destFolder):
 		os.remove(errFile)
 		return True # Preprocessing completed, stop
 	
-	
-
 
 def tic():
 	global stime
@@ -398,34 +419,59 @@ def toc(name=""):
 	print(name,time.time()-stime)
 
 def getAllProjectHeader(prjPath):
-	dep=subprocess.check_output(["find",prjPath,"-type","f","-name","*.h"],universal_newlines=True)
-	dep=dep.split("\n")[0:-2]
-	dep=[str(Path(d).parent) for d in dep]+["/usr/include","/usr/local/include","/opt/include","/usr/include/X11","/usr/include/asm",
-		"/usr/include/linux","usr/include/ncurses"]
-	return list(set(dep))
+    # Execute a 'find' command to locate all .h files in the given project directory.
+    dep = subprocess.check_output(["find", prjPath, "-type", "f", "-name", "*.h"], universal_newlines=True)
+    # Split the output by newline and remove the last two entries (typically empty lines).
+    dep = dep.split("\n")[0:-2]
+    # Convert each header file path to its parent directory and append common system include directories.
+    dep = [str(Path(d).parent) for d in dep] + ["/usr/include", "/usr/local/include", "/opt/include", "/usr/include/X11", "/usr/include/asm",
+                                               "/usr/include/linux", "usr/include/ncurses"]
+    # Remove duplicate entries by converting the list to a set, then return as a list.
+    return list(set(dep))
 
 if __name__ == '__main__':
-	start_time = time.time()
-	checkNumberInputs(sys.argv)
-	path, cFiles = getInputs(sys.argv)
-	destFolder = HOME_DIR + PREPROC_DIR + path.replace('../', '')
-	project_name_bar = path.replace('../', '').replace('__XOXO__', '/')
-	try:
-		shutil.copytree(path, destFolder, ignore=ignore_files, symlinks=True)
-	except FileExistsError:
-		print('The folder ' + destFolder + ' already exists, delete or rename it')
-		sys.exit(-1)
-	os.system('chmod -R 777 ' + destFolder) # shutil.copytree copies also folder permissions
-	
-	total = len(cFiles)
-	for iteration, cFile in enumerate(cFiles):
-		#tic()
-		printDebug('########################################', VERBOSE)
-		printDebug('[DEBUG] Filename ('+str(iteration+1)+'/'+str(total)+'): ' + cFile, VERBOSE)
-		exploreDependenciesTreeDFS(path, cFile, destFolder,deps=getAllProjectHeader(path))
-		#toc()
-		if not VERBOSE and not PRINT_LOGS:
-			printProgressBar(iteration+1, total, prefix='Preprocessing', suffix=project_name_bar, length=50)
-	end_time = time.time()
-	printAndSave('-------------', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
-	printAndSave('TIME\t' + str(end_time - start_time) + ' seconds', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
+    # Start the timer to measure the total execution time.
+    start_time = time.time()
+    # Verify that the number and type of input parameters are correct.
+    checkNumberInputs(sys.argv)
+    # Extract the main directory path and the list of .c files to process.
+    path, cFiles = getInputs(sys.argv)
+    # Construct the destination directory path for preprocessed files.
+    destFolder = HOME_DIR + PREPROC_DIR + path.replace('../', '')
+    # Prepare a project identifier string for the progress bar.
+    project_name_bar = path.replace('../', '').replace('__XOXO__', '/')
+    try:
+        # Copy the entire directory tree to the destination, preserving symlinks.
+        shutil.copytree(path, destFolder, ignore=ignore_files, symlinks=True)
+    except FileExistsError:
+        # Inform the user if the destination folder already exists and exit.
+        print('The folder ' + destFolder + ' already exists, delete or rename it')
+        sys.exit(-1)
+    # Recursively change the permissions of the destination folder.
+    os.system('chmod -R 777 ' + destFolder)
+
+    # Determine the total number of .c files to process.
+    total = len(cFiles)
+    # Iterate over each .c file.
+    for iteration, cFile in enumerate(cFiles):
+        # (Optional) Start timing measurement for the current file (currently commented out).
+        #tic()
+        # Print a debug separator.
+        printDebug('########################################', VERBOSE)
+        # Display the current file name and processing progress.
+        printDebug('[DEBUG] Filename (' + str(iteration + 1) + '/' + str(total) + '): ' + cFile, VERBOSE)
+        # Retrieve project header files.
+        deps = getAllProjectHeader(path)
+        # Process the file's dependencies and start preprocessing with the obtained headers.
+        exploreDependenciesTreeDFS(path, cFile, destFolder, deps=deps)
+        # (Optional) End timing measurement for the current file (currently commented out).
+        #toc()
+        # Update the terminal progress bar.
+        if not VERBOSE and not PRINT_LOGS:
+            printProgressBar(iteration + 1, total, prefix='Preprocessing', suffix=project_name_bar, length=50)
+    # Record the end time of the execution.
+    end_time = time.time()
+    # Append a separator line to the log file.
+    printAndSave('-------------', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)
+    # Log and save the total execution time.
+    printAndSave('TIME\t' + str(end_time - start_time) + ' seconds', destFolder + LOG_FILENAME, SAVE_LOGS, PRINT_LOGS)

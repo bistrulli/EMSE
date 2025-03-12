@@ -1,0 +1,11 @@
+
+processed
+.DS_Store
+projects
+*.log
+*.aux
+*.bbl
+*.blg
+*.pdf
+*.synctex.gz
+*.tex
