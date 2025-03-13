@@ -23,7 +23,16 @@ def get_ramdisk_temp_dir():
     # On Linux, we can use /dev/shm which is already mounted as tmpfs (in RAM)
     if 'linux' in os_name:
         ram_temp = '/dev/shm/preprocessor_tmp'
-        os.makedirs(ram_temp, exist_ok=True)
+        try:
+            # Create directory with explicit permissions
+            os.makedirs(ram_temp, mode=0o755, exist_ok=True)
+            # Make sure we have write permissions
+            if not os.access(ram_temp, os.W_OK):
+                print(f"Warning: No write permission for {ram_temp}, falling back to standard temp directory")
+                return tempfile.gettempdir()
+        except Exception as e:
+            print(f"Warning: Could not use /dev/shm: {e}, falling back to standard temp directory")
+            return tempfile.gettempdir()
         return ram_temp
         
     # On macOS, use the built-in RAM disk if it exists, otherwise use the standard temp dir
@@ -31,7 +40,7 @@ def get_ramdisk_temp_dir():
         # Check if we have permission to create files in /tmp
         if os.access('/tmp', os.W_OK):
             ram_temp = '/tmp/preprocessor_ramdisk'
-            os.makedirs(ram_temp, exist_ok=True)
+            os.makedirs(ram_temp, mode=0o755, exist_ok=True)
             return ram_temp
     
     # Fallback to standard temp directory for other OS or if RAM disk creation failed
@@ -174,23 +183,27 @@ def get_project_relative_path(file_path: str, project_path: str) -> str:
 
 def update_includes(source_file: str, missing_file: str) -> None:
     """Update include directive in source file to use the flattened path."""
-    with open(source_file, 'r') as f:
-        content = f.read()
-    
-    # Extract the basename from the missing file path
-    basename = os.path.basename(missing_file)
-    
-    # Create a regex pattern to match the include directive for this file
-    # This will match both quoted and angled includes with any path format
-    pattern = rf'#include\s+[<"].*?{re.escape(basename)}[>"]'
-    
-    # Replace with a flat include using the basename only
-    replacement = f'#include "{basename}"'
-    
-    new_content = re.sub(pattern, replacement, content)
-    
-    with open(source_file, 'w') as f:
-        f.write(new_content)
+    try:
+        with open(source_file, 'r') as f:
+            content = f.read()
+        
+        # Extract the basename from the missing file path
+        basename = os.path.basename(missing_file)
+        
+        # Create a regex pattern to match the include directive for this file
+        # This will match both quoted and angled includes with any path format
+        pattern = rf'#include\s+[<"].*?{re.escape(basename)}[>"]'
+        
+        # Replace with a flat include using the basename only
+        replacement = f'#include "{basename}"'
+        
+        new_content = re.sub(pattern, replacement, content)
+        
+        with open(source_file, 'w') as f:
+            f.write(new_content)
+    except PermissionError:
+        print(f"Warning: Permission denied when trying to update includes in {source_file}")
+        print(f"This might happen if the file is read-only. Continuing with original file.")
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -309,8 +322,17 @@ def preprocess_project(project_path: str, include_paths: List[str],
     tmp_base_dir = os.path.join(ram_temp_dir, f"preprocessor_{os.getpid()}")
     try:
         # Create a subdirectory with the project name inside the temporary directory
+        os.makedirs(tmp_base_dir, mode=0o755, exist_ok=True)
         tmp_dir = os.path.join(tmp_base_dir, project_name)
-        os.makedirs(tmp_dir, exist_ok=True)
+        os.makedirs(tmp_dir, mode=0o755, exist_ok=True)
+        
+        # Verify write permissions
+        if not os.access(tmp_dir, os.W_OK):
+            print(f"Warning: No write permission for temporary directory {tmp_dir}")
+            print("Falling back to standard temp directory")
+            tmp_base_dir = tempfile.mkdtemp()
+            tmp_dir = os.path.join(tmp_base_dir, project_name)
+            os.makedirs(tmp_dir, mode=0o755, exist_ok=True)
         
         if verbose:
             print(f"Using RAM-based temporary directory: {tmp_dir}")
@@ -458,6 +480,13 @@ def preprocess_project(project_path: str, include_paths: List[str],
                             dest = os.path.join(tmp_dir, basename)
                             shutil.copy2(match, dest)
                             
+                            # Ensure the copied file is writable
+                            try:
+                                os.chmod(dest, 0o644)
+                            except Exception as e:
+                                if verbose:
+                                    print(f"  Warning: Could not change permissions of {dest}: {e}")
+                            
                             # Map temporary path to original path
                             temp_to_orig_map[dest] = match
                             
@@ -523,6 +552,13 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                 # Copy to temp directory with project name
                                 dest = os.path.join(tmp_dir, basename)
                                 shutil.copy2(match, dest)
+                                
+                                # Ensure the copied file is writable
+                                try:
+                                    os.chmod(dest, 0o644)
+                                except Exception as e:
+                                    if verbose:
+                                        print(f"  Warning: Could not change permissions of {dest}: {e}")
                                 
                                 # Map temporary path to original path
                                 temp_to_orig_map[dest] = match
