@@ -17,34 +17,10 @@ except ImportError:
         return lambda x: x
 
 def get_ramdisk_temp_dir():
-    """Create or use a temporary directory in RAM for better I/O performance."""
-    os_name = platform.system().lower()
-    
-    # On Linux, we can use /dev/shm which is already mounted as tmpfs (in RAM)
-    if 'linux' in os_name:
-        ram_temp = '/dev/shm/preprocessor_tmp'
-        try:
-            # Create directory with explicit permissions
-            os.makedirs(ram_temp, mode=0o755, exist_ok=True)
-            # Make sure we have write permissions
-            if not os.access(ram_temp, os.W_OK):
-                print(f"Warning: No write permission for {ram_temp}, falling back to standard temp directory")
-                return tempfile.gettempdir()
-        except Exception as e:
-            print(f"Warning: Could not use /dev/shm: {e}, falling back to standard temp directory")
-            return tempfile.gettempdir()
-        return ram_temp
-        
-    # On macOS, use the built-in RAM disk if it exists, otherwise use the standard temp dir
-    elif 'darwin' in os_name:
-        # Check if we have permission to create files in /tmp
-        if os.access('/tmp', os.W_OK):
-            ram_temp = '/tmp/preprocessor_ramdisk'
-            os.makedirs(ram_temp, mode=0o755, exist_ok=True)
-            return ram_temp
-    
-    # Fallback to standard temp directory for other OS or if RAM disk creation failed
-    return tempfile.gettempdir()
+    """Create a temporary directory with correct permissions."""
+    # Always use the tempfile module to create a secure temporary directory
+    # This avoids permission issues on systems with restricted /dev/shm
+    return tempfile.mkdtemp(prefix="preprocessor_")
 
 def get_source_files(project_path: str) -> List[str]:
     """Get all .c and .h files in the project, sorted by size."""
@@ -315,27 +291,15 @@ def preprocess_project(project_path: str, include_paths: List[str],
     processed_files = 0
     skipped_files = 0
     
-    # Get RAM disk temp directory
-    ram_temp_dir = get_ramdisk_temp_dir()
-    
-    # Create a temporary directory for processing in RAM for better performance
-    tmp_base_dir = os.path.join(ram_temp_dir, f"preprocessor_{os.getpid()}")
+    # Create a temporary directory with proper permissions
+    tmp_base_dir = get_ramdisk_temp_dir()
     try:
         # Create a subdirectory with the project name inside the temporary directory
-        os.makedirs(tmp_base_dir, mode=0o755, exist_ok=True)
         tmp_dir = os.path.join(tmp_base_dir, project_name)
-        os.makedirs(tmp_dir, mode=0o755, exist_ok=True)
-        
-        # Verify write permissions
-        if not os.access(tmp_dir, os.W_OK):
-            print(f"Warning: No write permission for temporary directory {tmp_dir}")
-            print("Falling back to standard temp directory")
-            tmp_base_dir = tempfile.mkdtemp()
-            tmp_dir = os.path.join(tmp_base_dir, project_name)
-            os.makedirs(tmp_dir, mode=0o755, exist_ok=True)
+        os.makedirs(tmp_dir, exist_ok=True)
         
         if verbose:
-            print(f"Using RAM-based temporary directory: {tmp_dir}")
+            print(f"Using temporary directory: {tmp_dir}")
         
         # Dictionary to track original paths
         temp_to_orig_map = {}
@@ -370,6 +334,9 @@ def preprocess_project(project_path: str, include_paths: List[str],
             # Copy C file to temporary directory
             c_file_tmp = os.path.join(tmp_dir, os.path.basename(c_file))
             shutil.copy2(c_file, c_file_tmp)
+            
+            # Ensure the copied file is writable
+            os.chmod(c_file_tmp, 0o644)
             
             # Map temporary path to original path
             temp_to_orig_map[c_file_tmp] = c_file
