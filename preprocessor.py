@@ -4,8 +4,38 @@ import subprocess
 import re
 import argparse
 import tempfile
+import platform
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Mock tqdm if not installed
+    def tqdm(iterable=None, **kwargs):
+        if iterable is not None:
+            return iterable
+        return lambda x: x
+
+def get_ramdisk_temp_dir():
+    """Create or use a temporary directory in RAM for better I/O performance."""
+    os_name = platform.system().lower()
+    
+    # On Linux, we can use /dev/shm which is already mounted as tmpfs (in RAM)
+    if 'linux' in os_name:
+        ram_temp = '/dev/shm/preprocessor_tmp'
+        os.makedirs(ram_temp, exist_ok=True)
+        return ram_temp
+        
+    # On macOS, use the built-in RAM disk if it exists, otherwise use the standard temp dir
+    elif 'darwin' in os_name:
+        # Check if we have permission to create files in /tmp
+        if os.access('/tmp', os.W_OK):
+            ram_temp = '/tmp/preprocessor_ramdisk'
+            os.makedirs(ram_temp, exist_ok=True)
+            return ram_temp
+    
+    # Fallback to standard temp directory for other OS or if RAM disk creation failed
+    return tempfile.gettempdir()
 
 def get_source_files(project_path: str) -> List[str]:
     """Get all .c and .h files in the project, sorted by size."""
@@ -56,7 +86,15 @@ def find_files_by_name(project_path: str, filename: str) -> List[str]:
             matches.append(full_path)
     
     # Sort by file size in descending order
-    return sorted(matches, key=lambda x: os.path.getsize(x), reverse=True)
+    matches.sort(key=lambda x: os.path.getsize(x), reverse=True)
+    
+    if len(matches) > 0 and os.path.exists('/tmp/debug_sort.log'):
+        with open('/tmp/debug_sort.log', 'a') as f:
+            f.write(f"\nMatches for {filename}:\n")
+            for m in matches:
+                f.write(f"  {m} ({os.path.getsize(m)} bytes)\n")
+    
+    return matches
 
 def get_headers_from_list(source_files: List[str], include_paths: Set[str], project_path: str) -> Dict[str, str]:
     """Find the full paths of header files in the source files list."""
@@ -264,23 +302,39 @@ def preprocess_project(project_path: str, include_paths: List[str],
     processed_files = 0
     skipped_files = 0
     
-    # Create a temporary directory for processing
-    with tempfile.TemporaryDirectory() as tmp_base_dir:
+    # Get RAM disk temp directory
+    ram_temp_dir = get_ramdisk_temp_dir()
+    
+    # Create a temporary directory for processing in RAM for better performance
+    tmp_base_dir = os.path.join(ram_temp_dir, f"preprocessor_{os.getpid()}")
+    try:
         # Create a subdirectory with the project name inside the temporary directory
         tmp_dir = os.path.join(tmp_base_dir, project_name)
         os.makedirs(tmp_dir, exist_ok=True)
         
         if verbose:
-            print(f"Using temporary directory: {tmp_dir}")
+            print(f"Using RAM-based temporary directory: {tmp_dir}")
         
         # Dictionary to track original paths
         temp_to_orig_map = {}
+        
+        # Initialize progress bar
+        progress_bar = tqdm(
+            total=len(c_files),
+            desc="Preprocessing C files",
+            unit="file",
+            disable=verbose,  # Disable progress bar when verbose output is enabled
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+        )
         
         for c_file in c_files:
             # Calculate relative path and create output paths
             rel_path = os.path.relpath(c_file, project_path)
             out_path = os.path.join(project_out_dir, rel_path + '.i')
             err_path = os.path.join(project_out_dir, rel_path + '.err')
+            
+            # Update progress bar description with current file
+            progress_bar.set_description(f"Processing {os.path.basename(c_file)}")
             
             if verbose:
                 print(f"\nProcessing: {rel_path}")
@@ -310,6 +364,9 @@ def preprocess_project(project_path: str, include_paths: List[str],
             # Initialize error log
             error_log = []
             
+            # Set to track missing files we've already attempted to resolve to prevent infinite loops
+            attempted_missing_files = set()
+            
             # Define preprocessing function for repeated calls
             def run_preprocessor():
                 """Run the preprocessor and capture any errors."""
@@ -336,7 +393,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
                 return None
             
             # Try preprocessing iteratively, looking for missing files
-            max_iterations = 10  # Limit iterations to avoid infinite loops
+            max_iterations = float('inf')  # No limit on iterations
             current_iteration = 0
             
             while is_processable and current_iteration < max_iterations:
@@ -358,45 +415,190 @@ def preprocess_project(project_path: str, include_paths: List[str],
                 if missing_file:
                     if verbose:
                         print(f"  Missing file detected: {missing_file}")
-                        
-                    # Find file in project
-                    matches = find_files_by_name(project_path, os.path.basename(missing_file))
                     
-                    if matches:
-                        # Found at least one matching file
-                        match = matches[0]  # Take the largest file
-                        match_rel = os.path.relpath(match, project_path)
-                        
+                    basename = os.path.basename(missing_file)
+                    
+                    # Check if we've already tried to resolve this file to prevent infinite loops
+                    if basename in attempted_missing_files:
                         if verbose:
-                            print(f"  Found matching file: {match_rel}")
-                        
-                        # Copy to temp directory with project name
-                        dest = os.path.join(tmp_dir, os.path.basename(missing_file))
-                        shutil.copy2(match, dest)
-                        
-                        # Map temporary path to original path
-                        temp_to_orig_map[dest] = match
-                        
-                        # Update include directive in the C file to use the flattened path
-                        update_includes(c_file_tmp, missing_file)
-                        
-                        if verbose:
-                            print(f"  Copied to temporary directory and updated include")
-                            
-                        # Clear error log since we're making progress
-                        error_log = []
-                    else:
-                        if verbose:
-                            print(f"  Could not find {missing_file} in project")
+                            print(f"  Already attempted to resolve {basename}, skipping to prevent loops")
                         is_processable = False
-                        # Reset error log to only keep the last error
-                        error_log = [f"Fatal error: Missing file {missing_file} not found in project\n", f"{err_msg}\n"]
+                        error_log = [f"Fatal error: Circular dependency detected for {basename}\n", f"{err_msg}\n"]
+                        break
+                        
+                    # Add to our set of attempted files
+                    attempted_missing_files.add(basename)
+                    
+                    # Strategy 1: Try exact path first
+                    exact_path_found = False
+                    
+                    # Try relative to the current C file
+                    if not os.path.isabs(missing_file):
+                        possible_paths = []
+                        
+                        # Try relative to the original C file directory
+                        rel_to_c_file = os.path.join(c_file_dir, missing_file)
+                        if os.path.exists(rel_to_c_file):
+                            possible_paths.append(rel_to_c_file)
+                            
+                        # Try relative to project root
+                        rel_to_project = os.path.join(project_path, missing_file)
+                        if os.path.exists(rel_to_project) and rel_to_project not in possible_paths:
+                            possible_paths.append(rel_to_project)
+                        
+                        if possible_paths:
+                            exact_path_found = True
+                            match = possible_paths[0]  # Take the first found path
+                            match_rel = os.path.relpath(match, project_path)
+                            
+                            if verbose:
+                                print(f"  Found exact path match: {match_rel}")
+                            
+                            # Copy to temp directory with project name
+                            dest = os.path.join(tmp_dir, basename)
+                            shutil.copy2(match, dest)
+                            
+                            # Map temporary path to original path
+                            temp_to_orig_map[dest] = match
+                            
+                            # Update include directive in the C file to use the flattened path
+                            update_includes(c_file_tmp, missing_file)
+                            
+                            if verbose:
+                                print(f"  Copied to temporary directory and updated include")
+                            
+                            # Try preprocessor with this file to see if it resolves the dependency
+                            test_success, test_err = run_preprocessor()
+                            
+                            if test_success:
+                                if verbose:
+                                    print(f"  Successfully resolved missing file with exact path: {match_rel}")
+                                # Clear error log since we're making progress
+                                error_log = []
+                            else:
+                                # Check if the error is about a different missing file
+                                new_missing_file = extract_missing_file(test_err)
+                                if new_missing_file and new_missing_file != missing_file:
+                                    if verbose:
+                                        print(f"  Exact path match found for {basename}, but now missing: {new_missing_file}")
+                                    # Keep exact_path_found as True, we successfully resolved this file
+                                    # Clear error log since we're making progress
+                                    error_log = []
+                                    # Don't break, just continue with the next iteration of the while loop
+                                else:
+                                    if verbose:
+                                        print(f"  Exact path match did not resolve dependency")
+                                    exact_path_found = False
+                    
+                    # Strategy 2: If exact path didn't work, find file in project
+                    if not exact_path_found:
+                        if verbose:
+                            print(f"  Exact path not found or didn't resolve dependency, searching project-wide")
+                            
+                        # Find file in project
+                        matches = find_files_by_name(project_path, basename)
+                        
+                        if matches:
+                            # Log information about how many files with the same name were found
+                            if verbose:
+                                print(f"  Found {len(matches)} files with name '{basename}' in project")
+                                print(f"  Files are sorted by size in descending order:")
+                                for i, m in enumerate(matches[:5]):  # Show top 5 to avoid log clutter
+                                    size_kb = os.path.getsize(m) / 1024
+                                    print(f"    {i+1}. {os.path.relpath(m, project_path)} ({size_kb:.2f} KB)")
+                                if len(matches) > 5:
+                                    print(f"    ... and {len(matches) - 5} more")
+                        
+                            # Try each matching file, starting with the largest, until preprocessing succeeds
+                            missing_file_resolved = False
+                            tried_files = []
+                            
+                            for match in matches:
+                                match_rel = os.path.relpath(match, project_path)
+                                tried_files.append(match_rel)
+                                
+                                if verbose:
+                                    print(f"  Trying matching file: {match_rel} ({os.path.getsize(match)} bytes)")
+                                
+                                # Copy to temp directory with project name
+                                dest = os.path.join(tmp_dir, basename)
+                                shutil.copy2(match, dest)
+                                
+                                # Map temporary path to original path
+                                temp_to_orig_map[dest] = match
+                                
+                                # Update include directive in the C file to use the flattened path
+                                update_includes(c_file_tmp, missing_file)
+                                
+                                if verbose:
+                                    print(f"  Copied to temporary directory and updated include")
+                                
+                                # Try preprocessor with this file to see if it resolves the dependency
+                                test_success, test_err = run_preprocessor()
+                                
+                                if test_success:
+                                    if verbose:
+                                        print(f"  Successfully resolved missing file with: {match_rel}")
+                                    # Clear error log since we're making progress
+                                    error_log = []
+                                    missing_file_resolved = True
+                                    break
+                                else:
+                                    # Check if the error is for a different missing file - that means this file
+                                    # is probably correct but we need to resolve more dependencies
+                                    new_missing_file = extract_missing_file(test_err)
+                                    if new_missing_file and new_missing_file != missing_file:
+                                        if verbose:
+                                            print(f"  File {match_rel} is correct, but now missing: {new_missing_file}")
+                                        # This file is actually good, it helped resolve the original dependency
+                                        # Clear error log since we're making progress
+                                        error_log = []
+                                        missing_file_resolved = True
+                                        break
+                                    else:
+                                        if verbose:
+                                            print(f"  This file did not resolve the dependency, trying next match...")
+                            
+                            if not missing_file_resolved:
+                                if verbose:
+                                    print(f"  Tried {len(tried_files)} matching files but none resolved the dependency")
+                                    print(f"  Using the largest file as a best effort: {tried_files[0]}")
+                                # Use the largest file anyway as a last resort
+                                dest = os.path.join(tmp_dir, basename)
+                                match = matches[0]
+                                shutil.copy2(match, dest)
+                                temp_to_orig_map[dest] = match
+                                update_includes(c_file_tmp, missing_file)
+                                
+                                # Reset error log to show we tried all options
+                                error_log = [
+                                    f"Warning: Tried multiple files matching {basename} but none resolved all dependencies\n",
+                                    f"Files tried: {', '.join(tried_files)}\n",
+                                    f"Using the largest file ({tried_files[0]}) as a best effort\n",
+                                    f"Original error: {err_msg}\n"
+                                ]
+                        else:
+                            if verbose:
+                                print(f"  Could not find {missing_file} in project")
+                            is_processable = False
+                            # Reset error log to only keep the last error
+                            error_log = [f"Fatal error: Missing file {missing_file} not found in project\n", f"{err_msg}\n"]
                 else:
                     if verbose:
                         print(f"  Error not related to missing file")
                     is_processable = False
                     # Reset error log to only keep the last error
                     error_log = [f"Fatal error: Preprocessing failed with error not related to missing files\n", f"{err_msg}\n"]
+                
+                # Safety check for very large iteration counts
+                if current_iteration > 1000:
+                    if verbose:
+                        print(f"  WARNING: Very high iteration count ({current_iteration}), possible loop detected")
+                    
+                    # Every 1000 iterations, log the current state to help debug
+                    if current_iteration % 1000 == 0:
+                        error_log.append(f"WARNING: High iteration count ({current_iteration}), possible loop detected\n")
+                        error_log.append(f"Attempted missing files: {', '.join(attempted_missing_files)}\n")
             
             # Check if we exceeded max iterations
             if current_iteration >= max_iterations:
@@ -440,6 +642,8 @@ def preprocess_project(project_path: str, include_paths: List[str],
                             os.remove(err_path)
                     
                     processed_files += 1
+                    progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
+                    progress_bar.update(1)
                 
                 except subprocess.CalledProcessError as e:
                     # Reset error log to only keep the final error
@@ -455,6 +659,8 @@ def preprocess_project(project_path: str, include_paths: List[str],
                         f.writelines(error_log)
             else:
                 skipped_files += 1
+                progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
+                progress_bar.update(1)
                 if verbose:
                     print(f"  Failed to preprocess: {rel_path}")
                 
@@ -463,6 +669,17 @@ def preprocess_project(project_path: str, include_paths: List[str],
                     f.write(f"Error log for {rel_path}:\n")
                     f.write("="*80 + "\n")
                     f.writelines(error_log)
+        
+        # Close progress bar
+        progress_bar.close()
+        
+        # Clean up temporary directory
+        shutil.rmtree(tmp_base_dir, ignore_errors=True)
+        
+    except Exception as e:
+        # Clean up in case of error
+        shutil.rmtree(tmp_base_dir, ignore_errors=True)
+        raise e
     
     if verbose:
         print(f"\nPreprocessing complete:")

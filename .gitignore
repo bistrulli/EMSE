@@ -9,3 +9,4 @@ projects
 *.pdf
 *.synctex.gz
 *.tex
+env
