@@ -18,9 +18,26 @@ except ImportError:
 
 def get_ramdisk_temp_dir():
     """Create a temporary directory with correct permissions."""
-    # Always use the tempfile module to create a secure temporary directory
-    # This avoids permission issues on systems with restricted /dev/shm
-    return tempfile.mkdtemp(prefix="preprocessor_")
+    # Test the standard temporary directory for write permissions
+    system_tmpdir = tempfile.gettempdir()
+    test_file_path = os.path.join(system_tmpdir, f"preprocessor_test_{os.getpid()}")
+    try:
+        with open(test_file_path, 'w') as f:
+            f.write("test")
+        os.unlink(test_file_path)
+    except (PermissionError, OSError) as e:
+        # Fail immediately with a clear error message
+        raise RuntimeError(f"ERROR: Cannot write to temporary directory {system_tmpdir}: {e}\n"
+                          f"The preprocessor requires write access to the temporary directory.\n"
+                          f"Please ensure you have the necessary permissions.")
+    
+    # Create a temporary directory
+    try:
+        return tempfile.mkdtemp(prefix="preprocessor_")
+    except Exception as e:
+        # If we can't create a temporary directory, raise an error
+        raise RuntimeError(f"ERROR: Failed to create temporary directory: {e}\n"
+                          f"Please check your system's temporary directory permissions.")
 
 def get_source_files(project_path: str) -> List[str]:
     """Get all .c and .h files in the project, sorted by size."""
@@ -177,9 +194,9 @@ def update_includes(source_file: str, missing_file: str) -> None:
         
         with open(source_file, 'w') as f:
             f.write(new_content)
-    except PermissionError:
-        print(f"Warning: Permission denied when trying to update includes in {source_file}")
-        print(f"This might happen if the file is read-only. Continuing with original file.")
+    except PermissionError as e:
+        raise RuntimeError(f"ERROR: Permission denied when trying to update includes in {source_file}: {e}\n"
+                          f"The preprocessor requires write access to files in the temporary directory.")
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -272,8 +289,12 @@ def preprocess_project(project_path: str, include_paths: List[str],
         print(f"Output directory: {os.path.relpath(project_out_dir)}")
     
     # Create output directory
-    os.makedirs(project_out_dir, exist_ok=True)
-    
+    try:
+        os.makedirs(project_out_dir, exist_ok=True)
+    except PermissionError as e:
+        raise RuntimeError(f"ERROR: Cannot create output directory {project_out_dir}: {e}\n"
+                          f"Please check that you have write permissions to {output_base_dir}")
+
     # Find standard header directories in the project
     standard_include_dirs = find_header_directories(project_path)
     
@@ -292,11 +313,22 @@ def preprocess_project(project_path: str, include_paths: List[str],
     skipped_files = 0
     
     # Create a temporary directory with proper permissions
-    tmp_base_dir = get_ramdisk_temp_dir()
+    try:
+        tmp_base_dir = get_ramdisk_temp_dir()
+    except Exception as e:
+        # La funzione get_ramdisk_temp_dir già solleva una RuntimeError con un messaggio chiaro
+        raise
+
     try:
         # Create a subdirectory with the project name inside the temporary directory
         tmp_dir = os.path.join(tmp_base_dir, project_name)
-        os.makedirs(tmp_dir, exist_ok=True)
+        try:
+            os.makedirs(tmp_dir, exist_ok=True)
+            # Ensure the project subdirectory is writable
+            os.chmod(tmp_dir, 0o755)
+        except PermissionError as e:
+            raise RuntimeError(f"ERROR: Cannot set permissions on temporary directory {tmp_dir}: {e}\n"
+                             f"The preprocessor requires full write access to the temporary directory.")
         
         if verbose:
             print(f"Using temporary directory: {tmp_dir}")
@@ -333,13 +365,31 @@ def preprocess_project(project_path: str, include_paths: List[str],
             
             # Copy C file to temporary directory
             c_file_tmp = os.path.join(tmp_dir, os.path.basename(c_file))
-            shutil.copy2(c_file, c_file_tmp)
             
-            # Ensure the copied file is writable
-            os.chmod(c_file_tmp, 0o644)
+            # Make sure the parent directory exists with correct permissions
+            parent_dir = os.path.dirname(c_file_tmp)
+            if not os.path.exists(parent_dir):
+                try:
+                    os.makedirs(parent_dir, mode=0o755, exist_ok=True)
+                except PermissionError as e:
+                    raise RuntimeError(f"ERROR: Cannot create directory {parent_dir}: {e}\n"
+                                      f"The preprocessor requires full write access to all subdirectories.")
             
-            # Map temporary path to original path
-            temp_to_orig_map[c_file_tmp] = c_file
+            try:
+                shutil.copy2(c_file, c_file_tmp)
+                
+                # Ensure the copied file is writable
+                try:
+                    os.chmod(c_file_tmp, 0o644)
+                except Exception as e:
+                    raise RuntimeError(f"ERROR: Cannot set permissions for file {c_file_tmp}: {e}\n"
+                                      f"The preprocessor requires permissions to modify files in the temporary directory.")
+                
+                # Map temporary path to original path
+                temp_to_orig_map[c_file_tmp] = c_file
+            except PermissionError as e:
+                raise RuntimeError(f"ERROR: Permission denied when copying {c_file} to {c_file_tmp}: {e}\n"
+                                  f"The preprocessor requires full write access to the temporary directory.")
             
             # Build include flags
             # 1. Temp directory (highest priority)
@@ -445,15 +495,25 @@ def preprocess_project(project_path: str, include_paths: List[str],
                             
                             # Copy to temp directory with project name
                             dest = os.path.join(tmp_dir, basename)
+                            
+                            # Ensure the parent directory exists with correct permissions
+                            parent_dir = os.path.dirname(dest)
+                            if not os.path.exists(parent_dir):
+                                try:
+                                    os.makedirs(parent_dir, mode=0o755, exist_ok=True)
+                                except PermissionError as e:
+                                    raise RuntimeError(f"ERROR: Cannot create directory {parent_dir}: {e}\n"
+                                                     f"The preprocessor requires full write access to all subdirectories.")
+                                
                             shutil.copy2(match, dest)
                             
                             # Ensure the copied file is writable
                             try:
                                 os.chmod(dest, 0o644)
                             except Exception as e:
-                                if verbose:
-                                    print(f"  Warning: Could not change permissions of {dest}: {e}")
-                            
+                                raise RuntimeError(f"ERROR: Cannot set permissions for file {dest}: {e}\n"
+                                                 f"The preprocessor requires permissions to modify files in the temporary directory.")
+                                
                             # Map temporary path to original path
                             temp_to_orig_map[dest] = match
                             
@@ -518,14 +578,24 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                 
                                 # Copy to temp directory with project name
                                 dest = os.path.join(tmp_dir, basename)
+                                
+                                # Ensure the parent directory exists with correct permissions
+                                parent_dir = os.path.dirname(dest)
+                                if not os.path.exists(parent_dir):
+                                    try:
+                                        os.makedirs(parent_dir, mode=0o755, exist_ok=True)
+                                    except PermissionError as e:
+                                        raise RuntimeError(f"ERROR: Cannot create directory {parent_dir}: {e}\n"
+                                                         f"The preprocessor requires full write access to all subdirectories.")
+                                    
                                 shutil.copy2(match, dest)
                                 
                                 # Ensure the copied file is writable
                                 try:
                                     os.chmod(dest, 0o644)
                                 except Exception as e:
-                                    if verbose:
-                                        print(f"  Warning: Could not change permissions of {dest}: {e}")
+                                    raise RuntimeError(f"ERROR: Cannot set permissions for file {dest}: {e}\n"
+                                                     f"The preprocessor requires permissions to modify files in the temporary directory.")
                                 
                                 # Map temporary path to original path
                                 temp_to_orig_map[dest] = match
@@ -569,7 +639,25 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                 # Use the largest file anyway as a last resort
                                 dest = os.path.join(tmp_dir, basename)
                                 match = matches[0]
+                                
+                                # Ensure the parent directory exists with correct permissions
+                                parent_dir = os.path.dirname(dest)
+                                if not os.path.exists(parent_dir):
+                                    try:
+                                        os.makedirs(parent_dir, mode=0o755, exist_ok=True)
+                                    except PermissionError as e:
+                                        raise RuntimeError(f"ERROR: Cannot create directory {parent_dir}: {e}\n"
+                                                         f"The preprocessor requires full write access to all subdirectories.")
+                                    
                                 shutil.copy2(match, dest)
+                                
+                                # Ensure the copied file is writable
+                                try:
+                                    os.chmod(dest, 0o644)
+                                except Exception as e:
+                                    raise RuntimeError(f"ERROR: Cannot set permissions for file {dest}: {e}\n"
+                                                     f"The preprocessor requires permissions to modify files in the temporary directory.")
+                                
                                 temp_to_orig_map[dest] = match
                                 update_includes(c_file_tmp, missing_file)
                                 
