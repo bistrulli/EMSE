@@ -15,6 +15,8 @@ except ImportError:
         if iterable is not None:
             return iterable
         return lambda x: x
+    
+verbose=False
 
 def get_ramdisk_temp_dir():
     """Create a temporary directory with correct permissions."""
@@ -61,8 +63,30 @@ def flattening_includes(c_file: str, headers_to_process: Set[str], tmp_dir: str)
     """Modify all include directives in the C file to point to tmp_dir."""
     include_map = {}
     
-    with open(c_file, 'r') as f:
-        content = f.read()
+    # Prova diverse codifiche di caratteri
+    codecs_to_try = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+    content = None
+    
+    # Tenta di leggere il file con diverse codifiche
+    for codec in codecs_to_try:
+        try:
+            with open(c_file, 'r', encoding=codec) as f:
+                content = f.read()
+            # Se siamo qui, la lettura è andata a buon fine
+            used_codec = codec
+            break
+        except UnicodeDecodeError:
+            continue
+    
+    # Se non siamo riusciti a leggere il file con nessuna codifica, prova in modalità binaria
+    if content is None:
+        try:
+            with open(c_file, 'rb') as f:
+                binary_content = f.read()
+            content = binary_content.decode('ascii', errors='replace')
+            used_codec = 'ascii'
+        except Exception as e:
+            raise RuntimeError(f"ERROR: Could not read file {c_file} with any supported encoding: {e}")
     
     new_content = content
     for original_include in headers_to_process:
@@ -73,9 +97,18 @@ def flattening_includes(c_file: str, headers_to_process: Set[str], tmp_dir: str)
         pattern = f'#include.*?[<"].*?{os.path.basename(original_include)}[>"]'
         new_content = re.sub(pattern, f'#include "{new_include}"', new_content)
     
-    # Write back the modified content
-    with open(c_file, 'w') as f:
-        f.write(new_content)
+    # Write back the modified content with the same encoding
+    try:
+        if used_codec == 'ascii':
+            # Se abbiamo usato l'approccio binario+ascii, salva in binario
+            with open(c_file, 'wb') as f:
+                f.write(new_content.encode('ascii', errors='replace'))
+        else:
+            # Altrimenti usa la codifica che ha funzionato
+            with open(c_file, 'w', encoding=used_codec) as f:
+                f.write(new_content)
+    except Exception as e:
+        raise RuntimeError(f"ERROR: Could not write to file {c_file}: {e}")
     
     return include_map
 
@@ -158,17 +191,54 @@ def postprocess(preprocessed_file: str, temp_to_orig_map: Dict[str, str]):
     """
     if not os.path.exists(preprocessed_file):
         return
-        
-    with open(preprocessed_file, 'r') as f:
-        content = f.read()
+    
+    # Prova diverse codifiche di caratteri
+    codecs_to_try = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+    content = None
+    
+    # Tenta di leggere il file con diverse codifiche
+    for codec in codecs_to_try:
+        try:
+            with open(preprocessed_file, 'r', encoding=codec) as f:
+                content = f.read()
+            # Se siamo qui, la lettura è andata a buon fine
+            used_codec = codec
+            break
+        except UnicodeDecodeError:
+            continue
+    
+    # Se non siamo riusciti a leggere il file con nessuna codifica, prova in modalità binaria
+    if content is None:
+        try:
+            with open(preprocessed_file, 'rb') as f:
+                binary_content = f.read()
+            content = binary_content.decode('ascii', errors='replace')
+            used_codec = 'ascii'
+        except Exception as e:
+            # In caso di file binario preprocessato, non possiamo fare il postprocessing
+            # Questo è un caso raro ma possibile
+            print(f"WARNING: Could not read preprocessed file {preprocessed_file} with any supported encoding.")
+            print(f"Skipping postprocessing for this file.")
+            return
     
     # Replace all temporary paths with original paths
     new_content = content
     for temp_path, orig_path in temp_to_orig_map.items():
         new_content = new_content.replace(temp_path, orig_path)
     
-    with open(preprocessed_file, 'w') as f:
-        f.write(new_content)
+    # Write back the modified content with the same encoding
+    try:
+        if used_codec == 'ascii':
+            # Se abbiamo usato l'approccio binario+ascii, salva in binario
+            with open(preprocessed_file, 'wb') as f:
+                f.write(new_content.encode('ascii', errors='replace'))
+        else:
+            # Altrimenti usa la codifica che ha funzionato
+            with open(preprocessed_file, 'w', encoding=used_codec) as f:
+                f.write(new_content)
+    except Exception as e:
+        print(f"WARNING: Could not write to preprocessed file {preprocessed_file}: {e}")
+        print(f"Original file will remain unchanged.")
 
 def get_project_relative_path(file_path: str, project_path: str) -> str:
     """Get the relative path of a file from the project root."""
@@ -176,27 +246,64 @@ def get_project_relative_path(file_path: str, project_path: str) -> str:
 
 def update_includes(source_file: str, missing_file: str) -> None:
     """Update include directive in source file to use the flattened path."""
+    # Estrai il basename dal percorso del file mancante
+    basename = os.path.basename(missing_file)
+    
+    # Crea un pattern regex per trovare la direttiva include per questo file
+    # Questo corrisponderà sia agli include con virgolette che a quelli con parentesi angolari
+    pattern = rf'#include\s+[<"].*?{re.escape(basename)}[>"]'
+    
+    # Sostituisci con un include flat usando solo il basename
+    replacement = f'#include "{basename}"'
+    
+    # Prova diverse codifiche di caratteri
+    codecs_to_try = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+    
+    for codec in codecs_to_try:
+        try:
+            # Prova a leggere il file con la codifica corrente
+            with open(source_file, 'r', encoding=codec) as f:
+                content = f.read()
+            
+            # Se abbiamo letto con successo, aggiorna il contenuto
+            new_content = re.sub(pattern, replacement, content)
+            
+            # Scrivi il contenuto aggiornato usando la stessa codifica
+            with open(source_file, 'w', encoding=codec) as f:
+                f.write(new_content)
+            
+            # Abbiamo avuto successo, usciamo dal ciclo
+            return
+        except UnicodeDecodeError:
+            # Questa codifica non ha funzionato, prova la prossima
+            continue
+        except PermissionError as e:
+            raise RuntimeError(f"ERROR: Permission denied when trying to update includes in {source_file}: {e}\n"
+                              f"The preprocessor requires write access to files in the temporary directory.")
+    
+    # Se siamo qui, tutte le codifiche hanno fallito, prova l'approccio binario
     try:
-        with open(source_file, 'r') as f:
-            content = f.read()
+        # Leggi il file in modalità binaria
+        with open(source_file, 'rb') as f:
+            binary_content = f.read()
         
-        # Extract the basename from the missing file path
-        basename = os.path.basename(missing_file)
+        # Converti il pattern e il replacement in byte
+        pattern_bytes = pattern.encode('utf-8')
+        replacement_bytes = replacement.encode('utf-8')
         
-        # Create a regex pattern to match the include directive for this file
-        # This will match both quoted and angled includes with any path format
-        pattern = rf'#include\s+[<"].*?{re.escape(basename)}[>"]'
+        # Cerca di fare la sostituzione trattando come testo ASCII
+        # Questo approccio non è perfetto, ma è un fallback
+        ascii_content = binary_content.decode('ascii', errors='replace')
+        new_content = re.sub(pattern, replacement, ascii_content)
         
-        # Replace with a flat include using the basename only
-        replacement = f'#include "{basename}"'
-        
-        new_content = re.sub(pattern, replacement, content)
-        
-        with open(source_file, 'w') as f:
-            f.write(new_content)
-    except PermissionError as e:
-        raise RuntimeError(f"ERROR: Permission denied when trying to update includes in {source_file}: {e}\n"
-                          f"The preprocessor requires write access to files in the temporary directory.")
+        # Scrivi di nuovo in binario
+        with open(source_file, 'wb') as f:
+            f.write(new_content.encode('ascii', errors='replace'))
+            
+    except Exception as e:
+        # Se anche l'approccio binario fallisce, segnala l'errore dettagliato
+        raise RuntimeError(f"ERROR: Could not process file {source_file} with any supported encoding: {e}\n"
+                          f"File appears to contain binary or corrupted data.")
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -273,6 +380,36 @@ def find_header_directories(project_path: str) -> List[str]:
     
     return header_dirs
 
+# Define preprocessing function for repeated calls
+def run_preprocessor(include_flags=None,c_file_tmp=None,
+                     preprocessed_file=None):
+        """Run the preprocessor and capture any errors."""
+        cmd = ['cpp', '-M'] + include_flags + [c_file_tmp]
+
+        if(preprocessed_file is not None):
+            cmd+=['-o', preprocessed_file]
+
+        if verbose:
+            print(f"  Running preprocessor command: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return True, None
+        except subprocess.CalledProcessError as e:
+            return False, e.stderr
+
+# Define error parsing function
+def extract_missing_file(err_msg: str) -> Optional[str]:
+    """Extract missing file name from error message."""
+    if 'fatal error:' in err_msg and ('file not found' in err_msg or 'No such file or directory' in err_msg):
+        matches = re.findall(r"'([^']+\.[ch])'|\"([^\"]+\.[ch])\"", err_msg)
+        if matches:
+            for match in matches:
+                if match[0]:  # Match in first group (single quotes)
+                    return match[0]
+                elif match[1]:  # Match in second group (double quotes)
+                    return match[1]
+    return None
+
 def preprocess_project(project_path: str, include_paths: List[str], 
                       output_base_dir: str, verbose: bool = False):
     """Main function to preprocess a C project using an iterative approach."""
@@ -311,6 +448,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
     # Process each C file
     processed_files = 0
     skipped_files = 0
+    error_files = []  # Lista per tenere traccia dei file che hanno generato errori
     
     # Create a temporary directory with proper permissions
     try:
@@ -349,7 +487,6 @@ def preprocess_project(project_path: str, include_paths: List[str],
             # Calculate relative path and create output paths
             rel_path = os.path.relpath(c_file, project_path)
             out_path = os.path.join(project_out_dir, rel_path + '.i')
-            err_path = os.path.join(project_out_dir, rel_path + '.err')
             
             # Update progress bar description with current file
             progress_bar.set_description(f"Processing {os.path.basename(c_file)}")
@@ -406,39 +543,13 @@ def preprocess_project(project_path: str, include_paths: List[str],
             # Set to track missing files we've already attempted to resolve to prevent infinite loops
             attempted_missing_files = set()
             
-            # Define preprocessing function for repeated calls
-            def run_preprocessor():
-                """Run the preprocessor and capture any errors."""
-                cmd = ['cpp', '-M'] + include_flags + [c_file_tmp]
-                if verbose:
-                    print(f"  Running preprocessor command: {' '.join(cmd)}")
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                    return True, None
-                except subprocess.CalledProcessError as e:
-                    return False, e.stderr
-            
-            # Define error parsing function
-            def extract_missing_file(err_msg: str) -> Optional[str]:
-                """Extract missing file name from error message."""
-                if 'fatal error:' in err_msg and ('file not found' in err_msg or 'No such file or directory' in err_msg):
-                    matches = re.findall(r"'([^']+\.[ch])'|\"([^\"]+\.[ch])\"", err_msg)
-                    if matches:
-                        for match in matches:
-                            if match[0]:  # Match in first group (single quotes)
-                                return match[0]
-                            elif match[1]:  # Match in second group (double quotes)
-                                return match[1]
-                return None
-            
             # Try preprocessing iteratively, looking for missing files
-            max_iterations = float('inf')  # No limit on iterations
             current_iteration = 0
             
-            while is_processable and current_iteration < max_iterations:
+            while is_processable:
                 current_iteration += 1
                 
-                success, err_msg = run_preprocessor()
+                success, err_msg = run_preprocessor(include_flags,c_file_tmp)
                 
                 if success:
                     # Successfully generated dependencies, proceed to actual preprocessing
@@ -524,7 +635,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                 print(f"  Copied to temporary directory and updated include")
                             
                             # Try preprocessor with this file to see if it resolves the dependency
-                            test_success, test_err = run_preprocessor()
+                            test_success, test_err = run_preprocessor(include_flags,c_file_tmp)
                             
                             if test_success:
                                 if verbose:
@@ -607,7 +718,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                     print(f"  Copied to temporary directory and updated include")
                                 
                                 # Try preprocessor with this file to see if it resolves the dependency
-                                test_success, test_err = run_preprocessor()
+                                test_success, test_err = run_preprocessor(include_flags,c_file_tmp)
                                 
                                 if test_success:
                                     if verbose:
@@ -680,24 +791,6 @@ def preprocess_project(project_path: str, include_paths: List[str],
                     is_processable = False
                     # Reset error log to only keep the last error
                     error_log = [f"Fatal error: Preprocessing failed with error not related to missing files\n", f"{err_msg}\n"]
-                
-                # Safety check for very large iteration counts
-                if current_iteration > 1000:
-                    if verbose:
-                        print(f"  WARNING: Very high iteration count ({current_iteration}), possible loop detected")
-                    
-                    # Every 1000 iterations, log the current state to help debug
-                    if current_iteration % 1000 == 0:
-                        error_log.append(f"WARNING: High iteration count ({current_iteration}), possible loop detected\n")
-                        error_log.append(f"Attempted missing files: {', '.join(attempted_missing_files)}\n")
-            
-            # Check if we exceeded max iterations
-            if current_iteration >= max_iterations:
-                if verbose:
-                    print(f"  Exceeded maximum iterations ({max_iterations}), stopping")
-                is_processable = False
-                # Reset error log to only keep this error
-                error_log = [f"Fatal error: Exceeded maximum number of iterations ({max_iterations})\n", f"Last error: {err_msg}\n"]
             
             # Try actual preprocessing if dependencies were resolved
             if is_processable:
@@ -707,16 +800,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
                     if verbose:
                         print(f"  Running full preprocessing")
                     
-                    cpp_result = subprocess.run(
-                        ['cpp'] + include_flags + [c_file_tmp, '-o', preprocessed_file],
-                        capture_output=True,
-                        text=True,
-                        check=True
-                    )
-                    
-                    # Save any warnings to error log
-                    if cpp_result.stderr:
-                        error_log.append(f"Warnings during preprocessing:\n{cpp_result.stderr}\n")
+                    success, err_msg = run_preprocessor(include_flags,c_file_tmp,preprocessed_file)
                     
                     # Copy preprocessed file to output directory
                     shutil.copy2(preprocessed_file, out_path)
@@ -729,37 +813,36 @@ def preprocess_project(project_path: str, include_paths: List[str],
                     if verbose:
                         rel_out_path = os.path.relpath(out_path)
                         print(f"  Successfully saved preprocessed file: {rel_out_path}")
-                        if os.path.exists(err_path):
-                            os.remove(err_path)
                     
                     processed_files += 1
                     progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
                     progress_bar.update(1)
                 
                 except subprocess.CalledProcessError as e:
-                    # Reset error log to only keep the final error
-                    error_log = [f"Fatal error during full preprocessing:\n", f"{e.stderr}\n"]
+                    # Compatta il messaggio di errore in un'unica linea
+                    error_msg = re.sub(r'\s+', ' ', e.stderr.strip())
                     if verbose:
-                        print(f"  Error during preprocessing: {e}")
-                    skipped_files += 1
+                        print(f"  ERROR: {error_msg}")
                     
-                    # Save error log since processing failed
-                    with open(err_path, 'w') as f:
-                        f.write(f"Error log for {rel_path}:\n")
-                        f.write("="*80 + "\n")
-                        f.writelines(error_log)
+                    skipped_files += 1
+                    error_files.append((rel_path, f"Fatal error during full preprocessing: {error_msg}"))
+                    progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
+                    progress_bar.update(1)
             else:
                 skipped_files += 1
                 progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
                 progress_bar.update(1)
-                if verbose:
-                    print(f"  Failed to preprocess: {rel_path}")
                 
-                # Save error log since processing failed - only the last error is saved
-                with open(err_path, 'w') as f:
-                    f.write(f"Error log for {rel_path}:\n")
-                    f.write("="*80 + "\n")
-                    f.writelines(error_log)
+                # Compatta i messaggi di errore in un'unica linea
+                if error_log:
+                    error_msg = re.sub(r'\s+', ' ', ' '.join(error_log).strip())
+                    if verbose:
+                        print(f"  ERROR: {error_msg}")
+                    error_files.append((rel_path, error_msg))
+                else:
+                    if verbose:
+                        print(f"  Failed to preprocess: {rel_path} (unknown error)")
+                    error_files.append((rel_path, "Unknown error during preprocessing"))
         
         # Close progress bar
         progress_bar.close()
@@ -776,11 +859,18 @@ def preprocess_project(project_path: str, include_paths: List[str],
         print(f"\nPreprocessing complete:")
         print(f"- Successfully processed: {processed_files} files")
         print(f"- Skipped: {skipped_files} files")
+        
+        if error_files:
+            print(f"\nErrors summary:")
+            for rel_path, error_msg in error_files:
+                print(f"- {rel_path}: {error_msg}")
     
     return processed_files, skipped_files
 
 if __name__ == '__main__':
     args = parse_arguments()
+
+    verbose=args.verbose
     
     processed, skipped = preprocess_project(
         project_path=args.project_path,
