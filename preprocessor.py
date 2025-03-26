@@ -398,16 +398,21 @@ def run_preprocessor(include_flags=None,c_file_tmp=None,
             return False, e.stderr
 
 # Define error parsing function
-def extract_missing_file(err_msg: str) -> Optional[str]:
-    """Extract missing file name from error message."""
+def extract_missing_file(err_msg: str) -> Optional[Tuple[str, bool]]:
+    """Extract missing file name from error message and determine if it's a system include.
+    
+    Returns:
+        Tuple of (filename, is_system_include) or None if no match found
+    """
     if 'fatal error:' in err_msg and ('file not found' in err_msg or 'No such file or directory' in err_msg):
-        matches = re.findall(r"'([^']+\.[ch])'|\"([^\"]+\.[ch])\"", err_msg)
-        if matches:
-            for match in matches:
-                if match[0]:  # Match in first group (single quotes)
-                    return match[0]
-                elif match[1]:  # Match in second group (double quotes)
-                    return match[1]
+        # Try to match both system includes (<>) and local includes ("")
+        system_match = re.search(r'<([^>]+\.[ch])>', err_msg)
+        local_match = re.search(r'"([^"]+\.[ch])"', err_msg)
+        
+        if system_match:
+            return system_match.group(1), True
+        elif local_match:
+            return local_match.group(1), False
     return None
 
 def preprocess_project(project_path: str, include_paths: List[str], 
@@ -454,7 +459,6 @@ def preprocess_project(project_path: str, include_paths: List[str],
     try:
         tmp_base_dir = get_ramdisk_temp_dir()
     except Exception as e:
-        # La funzione get_ramdisk_temp_dir già solleva una RuntimeError con un messaggio chiaro
         raise
 
     try:
@@ -462,7 +466,6 @@ def preprocess_project(project_path: str, include_paths: List[str],
         tmp_dir = os.path.join(tmp_base_dir, project_name)
         try:
             os.makedirs(tmp_dir, exist_ok=True)
-            # Ensure the project subdirectory is writable
             os.chmod(tmp_dir, 0o755)
         except PermissionError as e:
             raise RuntimeError(f"ERROR: Cannot set permissions on temporary directory {tmp_dir}: {e}\n"
@@ -479,7 +482,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
             total=len(c_files),
             desc="Preprocessing C files",
             unit="file",
-            disable=verbose,  # Disable progress bar when verbose output is enabled
+            disable=verbose,
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
         )
         
@@ -487,6 +490,7 @@ def preprocess_project(project_path: str, include_paths: List[str],
             # Calculate relative path and create output paths
             rel_path = os.path.relpath(c_file, project_path)
             out_path = os.path.join(project_out_dir, rel_path + '.i')
+            err_path = os.path.join(project_out_dir, rel_path + '.err')
             
             # Update progress bar description with current file
             progress_bar.set_description(f"Processing {os.path.basename(c_file)}")
@@ -514,57 +518,38 @@ def preprocess_project(project_path: str, include_paths: List[str],
             
             try:
                 shutil.copy2(c_file, c_file_tmp)
-                
-                # Ensure the copied file is writable
-                try:
-                    os.chmod(c_file_tmp, 0o644)
-                except Exception as e:
-                    raise RuntimeError(f"ERROR: Cannot set permissions for file {c_file_tmp}: {e}\n"
-                                      f"The preprocessor requires permissions to modify files in the temporary directory.")
-                
-                # Map temporary path to original path
+                os.chmod(c_file_tmp, 0o644)
                 temp_to_orig_map[c_file_tmp] = c_file
             except PermissionError as e:
                 raise RuntimeError(f"ERROR: Permission denied when copying {c_file} to {c_file_tmp}: {e}\n"
                                   f"The preprocessor requires full write access to the temporary directory.")
             
             # Build include flags
-            # 1. Temp directory (highest priority)
-            # 2. User-provided include paths
             include_flags = [f'-I{tmp_dir}']
             include_flags.extend([f'-I{path}' for path in include_paths])
             
             # Initialize processing state
             is_processable = True
-            
-            # Initialize error log
             error_log = []
-            
-            # Set to track missing files we've already attempted to resolve to prevent infinite loops
             attempted_missing_files = set()
             
-            # Try preprocessing iteratively, looking for missing files
-            current_iteration = 0
-            
             while is_processable:
-                current_iteration += 1
-                
                 success, err_msg = run_preprocessor(include_flags,c_file_tmp)
                 
                 if success:
-                    # Successfully generated dependencies, proceed to actual preprocessing
                     if verbose:
                         print(f"  Successfully determined dependencies")
                     break
                 
-                error_log.append(f"Error during dependency check (iteration {current_iteration}):\n{err_msg}\n")
+                error_log.append(f"Error during dependency check:\n{err_msg}\n")
                 
                 # Check if error is due to missing file
-                missing_file = extract_missing_file(err_msg)
+                missing_file_info = extract_missing_file(err_msg)
                 
-                if missing_file:
+                if missing_file_info:
+                    missing_file, is_system_include = missing_file_info
                     if verbose:
-                        print(f"  Missing file detected: {missing_file}")
+                        print(f"  Missing file detected: {missing_file} ({'system' if is_system_include else 'local'} include)")
                     
                     basename = os.path.basename(missing_file)
                     
@@ -576,9 +561,17 @@ def preprocess_project(project_path: str, include_paths: List[str],
                         error_log = [f"Fatal error: Circular dependency detected for {basename}\n", f"{err_msg}\n"]
                         break
                         
-                    # Add to our set of attempted files
                     attempted_missing_files.add(basename)
                     
+                    # If it's a system include and not found, mark as not processable
+                    if is_system_include:
+                        if verbose:
+                            print(f"  System include {missing_file} not found in system paths")
+                        is_processable = False
+                        error_log = [f"Fatal error: System include {missing_file} not found in system paths\n", f"{err_msg}\n"]
+                        break
+                    
+                    # For local includes, proceed with project-wide search
                     # Strategy 1: Try exact path first
                     exact_path_found = False
                     
@@ -644,14 +637,22 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                 error_log = []
                             else:
                                 # Check if the error is about a different missing file
-                                new_missing_file = extract_missing_file(test_err)
-                                if new_missing_file and new_missing_file != missing_file:
-                                    if verbose:
-                                        print(f"  Exact path match found for {basename}, but now missing: {new_missing_file}")
-                                    # Keep exact_path_found as True, we successfully resolved this file
-                                    # Clear error log since we're making progress
-                                    error_log = []
-                                    # Don't break, just continue with the next iteration of the while loop
+                                new_missing_file_info = extract_missing_file(test_err)
+                                if new_missing_file_info:
+                                    new_missing_file, new_is_system_include = new_missing_file_info
+                                    if new_missing_file != missing_file:
+                                        if verbose:
+                                            print(f"  Exact path match found for {basename}, but now missing: {new_missing_file}")
+                                        # Keep exact_path_found as True, we successfully resolved this file
+                                        # Clear error log since we're making progress
+                                        error_log = []
+                                        # Don't break, just continue with the next iteration of the while loop
+                                    elif new_is_system_include:
+                                        if verbose:
+                                            print(f"  Exact path match found but now missing system include: {new_missing_file}")
+                                        is_processable = False
+                                        error_log = [f"Fatal error: System include {new_missing_file} not found in system paths\n", f"{test_err}\n"]
+                                        break
                                 else:
                                     if verbose:
                                         print(f"  Exact path match did not resolve dependency")
@@ -730,18 +731,26 @@ def preprocess_project(project_path: str, include_paths: List[str],
                                 else:
                                     # Check if the error is for a different missing file - that means this file
                                     # is probably correct but we need to resolve more dependencies
-                                    new_missing_file = extract_missing_file(test_err)
-                                    if new_missing_file and new_missing_file != missing_file:
-                                        if verbose:
-                                            print(f"  File {match_rel} is correct, but now missing: {new_missing_file}")
-                                        # This file is actually good, it helped resolve the original dependency
-                                        # Clear error log since we're making progress
-                                        error_log = []
-                                        missing_file_resolved = True
-                                        break
-                                    else:
-                                        if verbose:
-                                            print(f"  This file did not resolve the dependency, trying next match...")
+                                    new_missing_file_info = extract_missing_file(test_err)
+                                    if new_missing_file_info:
+                                        new_missing_file, new_is_system_include = new_missing_file_info
+                                        if new_missing_file != missing_file:
+                                            if verbose:
+                                                print(f"  File {match_rel} is correct, but now missing: {new_missing_file}")
+                                            # This file is actually good, it helped resolve the original dependency
+                                            # Clear error log since we're making progress
+                                            error_log = []
+                                            missing_file_resolved = True
+                                            break
+                                        elif new_is_system_include:
+                                            if verbose:
+                                                print(f"  File {match_rel} is correct, but now missing system include: {new_missing_file}")
+                                            is_processable = False
+                                            error_log = [f"Fatal error: System include {new_missing_file} not found in system paths\n", f"{test_err}\n"]
+                                            break
+                                        else:
+                                            if verbose:
+                                                print(f"  This file did not resolve the dependency, trying next match...")
                             
                             if not missing_file_resolved:
                                 if verbose:
@@ -819,13 +828,16 @@ def preprocess_project(project_path: str, include_paths: List[str],
                     progress_bar.update(1)
                 
                 except subprocess.CalledProcessError as e:
-                    # Compatta il messaggio di errore in un'unica linea
-                    error_msg = re.sub(r'\s+', ' ', e.stderr.strip())
+                    error_msg = e.stderr.strip()
                     if verbose:
                         print(f"  ERROR: {error_msg}")
                     
+                    # Save detailed error to .err file
+                    with open(err_path, 'w') as f:
+                        f.write(f"Error during preprocessing:\n{error_msg}\n")
+                    
                     skipped_files += 1
-                    error_files.append((rel_path, f"Fatal error during full preprocessing: {error_msg}"))
+                    error_files.append((rel_path, error_msg))
                     progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
                     progress_bar.update(1)
             else:
@@ -833,12 +845,18 @@ def preprocess_project(project_path: str, include_paths: List[str],
                 progress_bar.set_postfix(processed=processed_files, skipped=skipped_files)
                 progress_bar.update(1)
                 
-                # Compatta i messaggi di errore in un'unica linea
+                # Save detailed error to .err file
                 if error_log:
-                    error_msg = re.sub(r'\s+', ' ', ' '.join(error_log).strip())
+                    error_msg = ' '.join(error_log).strip()
+                    with open(err_path, 'w') as f:
+                        f.write(error_msg)
+                    
+                    # For verbose output, show only the main error message
                     if verbose:
-                        print(f"  ERROR: {error_msg}")
-                    error_files.append((rel_path, error_msg))
+                        main_error = error_log[0].strip()
+                        print(f"  ERROR: {main_error}")
+                    
+                    error_files.append((rel_path, main_error))
                 else:
                     if verbose:
                         print(f"  Failed to preprocess: {rel_path} (unknown error)")
