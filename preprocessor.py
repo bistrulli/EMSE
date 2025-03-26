@@ -548,27 +548,25 @@ def preprocess_project(project_path: str, include_paths: List[str],
                 
                 if missing_file_info:
                     missing_file, is_system_include = missing_file_info
-                    if verbose:
-                        print(f"  Missing file detected: {missing_file} ({'system' if is_system_include else 'local'} include)")
                     
                     basename = os.path.basename(missing_file)
                     
                     # Check if we've already tried to resolve this file to prevent infinite loops
                     if basename in attempted_missing_files:
-                        if verbose:
-                            print(f"  Already attempted to resolve {basename}, skipping to prevent loops")
                         is_processable = False
                         error_log = [f"Fatal error: Circular dependency detected for {basename}\n", f"{err_msg}\n"]
+                        if verbose:
+                            print(f"FATAL ERROR: {os.path.relpath(err_path)}")
                         break
                         
                     attempted_missing_files.add(basename)
                     
                     # If it's a system include and not found, mark as not processable
                     if is_system_include:
-                        if verbose:
-                            print(f"  System include {missing_file} not found in system paths")
                         is_processable = False
                         error_log = [f"Fatal error: System include {missing_file} not found in system paths\n", f"{err_msg}\n"]
+                        if verbose:
+                            print(f"FATAL ERROR: {os.path.relpath(err_path)}")
                         break
                     
                     # For local includes, proceed with project-wide search
@@ -829,12 +827,13 @@ def preprocess_project(project_path: str, include_paths: List[str],
                 
                 except subprocess.CalledProcessError as e:
                     error_msg = e.stderr.strip()
-                    if verbose:
-                        print(f"  ERROR: {error_msg}")
                     
                     # Save detailed error to .err file
                     with open(err_path, 'w') as f:
                         f.write(f"Error during preprocessing:\n{error_msg}\n")
+                    
+                    if verbose:
+                        print(f"FATAL ERROR: {os.path.relpath(err_path)}")
                     
                     skipped_files += 1
                     error_files.append((rel_path, error_msg))
@@ -851,15 +850,13 @@ def preprocess_project(project_path: str, include_paths: List[str],
                     with open(err_path, 'w') as f:
                         f.write(error_msg)
                     
-                    # For verbose output, show only the main error message
                     if verbose:
-                        main_error = error_log[0].strip()
-                        print(f"  ERROR: {main_error}")
+                        print(f"FATAL ERROR: {os.path.relpath(err_path)}")
                     
-                    error_files.append((rel_path, main_error))
+                    error_files.append((rel_path, error_msg))
                 else:
                     if verbose:
-                        print(f"  Failed to preprocess: {rel_path} (unknown error)")
+                        print(f"FATAL ERROR: {os.path.relpath(err_path)}")
                     error_files.append((rel_path, "Unknown error during preprocessing"))
         
         # Close progress bar
@@ -879,9 +876,9 @@ def preprocess_project(project_path: str, include_paths: List[str],
         print(f"- Skipped: {skipped_files} files")
         
         if error_files:
-            print(f"\nErrors summary:")
-            for rel_path, error_msg in error_files:
-                print(f"- {rel_path}: {error_msg}")
+            print(f"\nError files generated:")
+            for rel_path, _ in error_files:
+                print(f"- {os.path.join(project_out_dir, rel_path + '.err')}")
     
     return processed_files, skipped_files
 
