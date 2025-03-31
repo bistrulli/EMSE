@@ -322,9 +322,9 @@ def main():
         shutil.rmtree(temp_dir)
 
 if __name__ == '__main__':
-    profiler = cProfile.Profile()
-    profiler.enable()
+    #profiler = cProfile.Profile()
+    #profiler.enable()
     main()
-    profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats('cumulative')
-    stats.print_stats() 
+    #profiler.disable()
+    #stats = pstats.Stats(profiler).sort_stats('cumulative')
+    #stats.print_stats() 
