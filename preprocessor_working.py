@@ -82,12 +82,14 @@ def find_file_in_project(file_name: str, project_path: Path, current_file: Path)
         current_file: Path del file corrente che sta includendo file_name
     """
     try:
-        # Se il file da cercare ha lo stesso nome del file in preprocessamento,
-        # cerca solo nella directory del file corrente
+        # Prima prova a trovare il file usando il path relativo completo
+        relative_path = current_file.parent / file_name
+        if relative_path.exists():
+            return relative_path
+            
+        # Se il file ha lo stesso nome del file in preprocessamento,
+        # non fare la ricerca project-wise
         if Path(file_name).name == current_file.name:
-            relative_path = current_file.parent / file_name
-            if relative_path.exists():
-                return relative_path
             return None
             
         # Altrimenti, cerca nel progetto
