@@ -38,13 +38,14 @@ def analyze_log(log_file: Path, project_path: Path):
     print("-" * 80)
     
     # Pattern per trovare i messaggi di errore per dipendenze di progetto mancanti
-    pattern = r'Failed: missing project dependency "([^"]+)"'
+    # Ora includiamo anche il nome del file che sta includendo
+    pattern = r'Processing ([^\n]+)\n.*?Failed: missing project dependency "([^"]+)"'
     
     # Leggi il file di log
     with open(log_file, 'r') as f:
         log_content = f.read()
     
-    # Trova tutte le dipendenze mancanti
+    # Trova tutte le dipendenze mancanti insieme al file che le include
     missing_deps = re.findall(pattern, log_content)
     
     if not missing_deps:
@@ -55,8 +56,16 @@ def analyze_log(log_file: Path, project_path: Path):
     print("-" * 80)
     
     # Per ogni dipendenza mancante
-    for dep in missing_deps:
+    for including_file, dep in missing_deps:
+        # Se la dipendenza ha lo stesso nome del file che la include, la saltiamo
+        if Path(dep).name == Path(including_file).name:
+            print(f"\nSkipping dependency: {dep}")
+            print(f"  Reason: Same name as including file {including_file}")
+            print("-" * 40)
+            continue
+            
         print(f"\nChecking dependency: {dep}")
+        print(f"  Including file: {including_file}")
         
         # Cerca il file nel progetto
         found_files = find_file_in_project(dep, project_path)
