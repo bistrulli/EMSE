@@ -185,68 +185,28 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
                    output_dir: Path, temp_dir: Path) -> bool:
     """
     Preprocessa un singolo file C risolvendo le dipendenze mancanti.
-    
-    Logica della funzione:
-    1. Setup iniziale:
-       - Crea i path per il file di output (.i) e di errore (.err)
-       - Copia il file sorgente in una directory temporanea
-    
-    2. Loop di risoluzione dipendenze:
-       - Esegue cpp -M per trovare le dipendenze mancanti
-       - Se trova una dipendenza mancante:
-         * Se è una dipendenza di sistema -> errore
-         * Se è una dipendenza di progetto -> cerca il file e copialo in temp
-       - Aggiorna gli include per usare i file copiati
-       - Ripeti finché non ci sono più dipendenze mancanti
-    
-    3. Preprocessing finale:
-       - Esegue cpp -E per generare il file preprocessato
-       - Sostituisci i path temporanei con quelli originali
-    
-    Args:
-        c_file: File .c da preprocessare
-        project_path: Path del progetto
-        include_paths: Lista dei path dove cercare gli include
-        output_dir: Directory dove salvare i file .i e .err
-        temp_dir: Directory temporanea per i file copiati
-        
-    Returns:
-        True se il preprocessing ha successo, False altrimenti
     """
-    # Mostra il file che stiamo processando (relativo alla root del progetto)
     print(f"\nProcessing {c_file.relative_to(project_path)}", flush=True)
     
-    # Setup dei path di output (.i e .err nella stessa struttura del progetto)
+    # Setup dei path di output
     rel_path = c_file.relative_to(project_path)
     out_path = output_dir / f"{rel_path}.i"
     err_path = output_dir / f"{rel_path}.err"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Copia il file .c nella directory temporanea per lavorarci
+    # Copia il file .c nella directory temporanea
     temp_file = temp_dir / c_file.name
     shutil.copy2(c_file, temp_file)
     
-    # Mappa per tenere traccia dei path originali (serve per il postprocessing)
+    # Mappa per tenere traccia dei path originali
     path_map = {str(temp_file): str(c_file)}
-    
-    #ok ho capito il problema, quando risolo i missing include di un file e' possibile che 
-    #i nuovi include considerati abbiamo a loro volta dei missing include. Ade esempio il file 
-    #cpupower-monitor.c include il file cpupower-monitor.h che a sua volta include "idle-monitor.h" che essendo
-    #un file di progetto andrebbe incluso con lo stesso meccanismo. In pratica io dovrei chiamare 
-    #la funzione preprocess_file anche su tutta la catena degli include. Una strategia possibile
-    #potrebbe essere: quando copio una missing include del file, allora preprocesso ricorsivamente anche quella
-    #per cercare di capire se ha delle missing include a sua volta. Puoi autarmi a fare questa modifica in modo pulito e che io possa capirla leggendo il codice
-
 
     # Loop di risoluzione delle dipendenze
     while True:
-        #print(f"\nDebug iteration:", flush=True)
-        # Prova a trovare le dipendenze con cpp -M
         success, err_msg = run_cpp_m(temp_file, [temp_dir] + include_paths)
         if success:
-            break  # Tutte le dipendenze sono risolte
+            break
             
-        # Se c'è un errore, estrai il nome del file mancante
         missing_info = extract_missing_file(err_msg)
         if missing_info is None:
             print(f"  Failed: preprocessing error")
@@ -255,9 +215,7 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
             return False
         
         missing_file, is_system = missing_info
-        #print(f"  Debug missing file: {missing_file} (system: {is_system})", flush=True)
         
-        # Se manca una dipendenza di sistema, non possiamo fare nulla
         if is_system:
             print(f"  Failed: missing system dependency <{missing_file}>", flush=True)
             if err_msg:
@@ -274,12 +232,10 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         
         # Copia il file trovato nella directory temporanea
         temp_dep = temp_dir / found_file.name
-        #print(f" Debug copying found file {temp_dep}, exists:{temp_dep.exists()}")
         shutil.copy2(found_file, temp_dep)
-        #print(f" Debug copying found file {temp_dep}, exists:{temp_dep.exists()}")
         path_map[str(temp_dep)] = str(found_file)
         
-        #Aggiorna gli include nel file temporaneo per usare il file copiato
+        # Aggiorna gli include nel file temporaneo
         update_includes(temp_file, missing_file, update_all_headers=True)
     
     # Tutte le dipendenze sono risolte, esegui il preprocessing finale
@@ -294,8 +250,12 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         
         # Sostituisci i path temporanei con quelli originali nel file .i
         content = out_path.read_text()
-        for temp_path, orig_path in path_map.items():
+        # Ordina i path per lunghezza decrescente per evitare sostituzioni parziali
+        sorted_paths = sorted(path_map.items(), key=lambda x: len(x[0]), reverse=True)
+        for temp_path, orig_path in sorted_paths:
+            # Sostituisci sia il path completo che solo il nome del file
             content = content.replace(temp_path, orig_path)
+            content = content.replace(Path(temp_path).name, Path(orig_path).name)
         out_path.write_text(content)
         
         print("  Success", flush=True)
