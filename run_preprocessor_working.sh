@@ -14,13 +14,6 @@ KERNEL_SOURCE="$3"
 PROJECT_DIR="$4"
 ARCH="$5"
 
-# Path del server cpp
-CPP_SERVER_PATH="$(dirname "$0")/cpp_server/cpp_api"
-if [ ! -f "$CPP_SERVER_PATH" ]; then
-    echo "ERROR: Cpp server executable not found at: $CPP_SERVER_PATH"
-    exit 1
-fi
-
 # Verifica che le directory esistano
 if [ ! -d "$KERNEL_SOURCE" ]; then
     echo "ERROR: Kernel source directory not found: $KERNEL_SOURCE"
@@ -61,7 +54,6 @@ done
 echo "Starting preprocessing..."
 echo "Project directory: $PROJECT_DIR"
 echo "Output directory: $OUTPUT_DIR"
-echo "Cpp server path: $CPP_SERVER_PATH"
 echo "Include paths:"
 for path in $INCLUDE_PATHS; do
     echo "  - $path"
