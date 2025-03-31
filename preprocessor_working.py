@@ -73,11 +73,25 @@ def extract_missing_file(err_msg: str) -> Optional[Tuple[str, bool]]:
         return file, delim == '<'
     return None
 
-def find_file_in_project(file_name: str, project_path: Path) -> Optional[Path]:
-    """Cerca un file nel progetto usando find."""
+def find_file_in_project(file_name: str, project_path: Path, current_file: Path) -> Optional[Path]:
+    """Cerca un file nel progetto usando find.
+    
+    Args:
+        file_name: Nome del file da cercare
+        project_path: Path del progetto
+        current_file: Path del file corrente che sta includendo file_name
+    """
     try:
+        # Se il file da cercare ha lo stesso nome del file in preprocessamento,
+        # cerca solo nella directory del file corrente
+        if Path(file_name).name == current_file.name:
+            relative_path = current_file.parent / file_name
+            if relative_path.exists():
+                return relative_path
+            return None
+            
+        # Altrimenti, cerca nel progetto
         cmd = ['find', str(project_path), '-name', Path(file_name).name]
-        #print(f"  Debug: Executing command: {' '.join(cmd)}", flush=True)
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0 and result.stdout:
@@ -85,18 +99,9 @@ def find_file_in_project(file_name: str, project_path: Path) -> Optional[Path]:
             if matches:
                 # Ordina per dimensione e prendi il più grande
                 matches.sort(key=lambda x: x.stat().st_size if x.exists() else 0, reverse=True)
-                #print(f"  Debug: Found matches: {matches}", flush=True)
                 return matches[0]
-            else:
-                pass
-                #print(f"  Debug: No matches found for {file_name}", flush=True)
-        else:
-            pass
-            #print(f"  Debug: find command failed with return code {result.returncode}", flush=True)
-            #print(f"  Debug: stderr: {result.stderr}", flush=True)
     except Exception as e:
         print(f"  Debug: Exception in find_file_in_project: {str(e)}", flush=True)
-        print(f"  Debug: Exception type: {type(e)}", flush=True)
     return None
 
 def update_includes(file_path: Path, missing_file: str, update_all_headers: bool = False) -> None:
@@ -241,7 +246,7 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
             return False
         
         # Cerca il file mancante nel progetto
-        found_file = find_file_in_project(missing_file, project_path)
+        found_file = find_file_in_project(missing_file, project_path, temp_file)
         if not found_file:
             print(f'  Failed: missing project dependency "{missing_file}"', flush=True)
             if err_msg:
