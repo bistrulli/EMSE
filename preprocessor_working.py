@@ -310,8 +310,8 @@ def main():
                 for file in temp_dir.iterdir():
                     file.unlink()
             
-            if(skipped+processed)==200:
-                break
+            #if(skipped+processed)==200:
+            #    break
         
         print(f"\nPreprocessing complete:", flush=True)
         print(f"- Successfully processed: {processed} files", flush=True)
