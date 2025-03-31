@@ -104,6 +104,26 @@ def find_file_in_project(file_name: str, project_path: Path, current_file: Path)
         print(f"  Debug: Exception in find_file_in_project: {str(e)}", flush=True)
     return None
 
+def read_file_with_fallback_encoding(file_path: Path) -> str:
+    """Legge un file di testo provando diverse codifiche in ordine di probabilità.
+    
+    Args:
+        file_path: Path del file da leggere
+        
+    Returns:
+        Il contenuto del file come stringa
+        
+    Raises:
+        UnicodeDecodeError: Se nessuna codifica funziona
+    """
+    encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+    for encoding in encodings:
+        try:
+            return file_path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError(f"Could not decode file with any of the encodings: {encodings}")
+
 def update_includes(file_path: Path, missing_file: str, update_all_headers: bool = False) -> None:
     """Aggiorna gli include nel file per usare i file copiati nella directory temporanea.
     
@@ -112,11 +132,10 @@ def update_includes(file_path: Path, missing_file: str, update_all_headers: bool
         missing_file: Nome del file mancante
         update_all_headers: Se True, aggiorna gli include anche in tutti gli header nella directory temporanea
     """
-    # Leggi il contenuto del file
-    content = file_path.read_text()
+    # Leggi il contenuto del file usando il fallback delle codifiche
+    content = read_file_with_fallback_encoding(file_path)
     
     # Trova tutti gli include di progetto che contengono il file mancante
-    # Il pattern cerca solo gli include con virgolette che contengono il file mancante
     pattern = r'#include\s+".*?' + re.escape(missing_file) + r'"'
     
     # Debug: mostra tutti i match trovati
@@ -138,7 +157,7 @@ def update_includes(file_path: Path, missing_file: str, update_all_headers: bool
         for file_to_update in files_to_update:
             if file_to_update != file_path:  # Non aggiornare il file appena modificato
                 try:
-                    content = file_to_update.read_text()
+                    content = read_file_with_fallback_encoding(file_to_update)
                     if missing_file in content:  # Se il file contiene l'include
                         new_content = re.sub(pattern, f'#include "{Path(missing_file).name}"', content)
                         file_to_update.write_text(new_content)
