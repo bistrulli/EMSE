@@ -40,16 +40,36 @@ def setup_directories(project_path: str, output_dir: str) -> Tuple[Path, Path]:
     # Crea anche la directory root del progetto
     project_out_dir.mkdir(parents=True, exist_ok=True)
     
+    # Crea una directory temporanea con il nome del progetto
+    temp_base = Path('/dev/shm')
+    temp_dir = None
+    max_attempts = 10
+    attempt = 0
     
-    temp_dir = Path('/dev/shm') / f'preprocessor_{uuid.uuid4().hex[:8]}'
-    temp_dir.mkdir()
-
-    # Crea directory temporanea
-    #temp_dir = Path(tempfile.mkdtemp(prefix="preprocessor_"))
+    while attempt < max_attempts:
+        try:
+            # Usa il nome del progetto nella directory temporanea
+            temp_name = f'preprocessor_{project_name}'
+            temp_dir = temp_base / temp_name
+            
+            # Prova a creare la directory
+            temp_dir.mkdir(exist_ok=False)
+            
+            # Imposta i permessi corretti
+            temp_dir.chmod(0o777)
+            
+            break
+        except (PermissionError, OSError) as e:
+            print(f"Warning: Could not create temporary directory in /dev/shm: {e}")
+            # Fallback su una directory temporanea nel filesystem normale
+            temp_dir = Path(tempfile.mkdtemp(prefix=f"preprocessor_{project_name}_"))
+            break
+        except Exception as e:
+            print(f"Warning: Unexpected error creating temporary directory: {e}")
+            attempt += 1
     
-    #debug_dir=project_out_dir/"debug"
-    #debug_dir.mkdir(parents=True, exist_ok=True)
-    #temp_dir = debug_dir
+    if temp_dir is None:
+        raise RuntimeError("Failed to create temporary directory after multiple attempts")
     
     return project_out_dir, temp_dir
 
