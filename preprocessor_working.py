@@ -219,6 +219,8 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
     # Copia il file .c nella directory temporanea
     temp_file = temp_dir / c_file.name
     shutil.copy2(c_file, temp_file)
+    # Imposta i permessi corretti sul file copiato
+    temp_file.chmod(0o666)
     
     # Mappa per tenere traccia dei path originali
     path_map = {str(temp_file): str(c_file)}
@@ -255,6 +257,8 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         # Copia il file trovato nella directory temporanea
         temp_dep = temp_dir / found_file.name
         shutil.copy2(found_file, temp_dep)
+        # Imposta i permessi corretti sul file copiato
+        temp_dep.chmod(0o666)
         path_map[str(temp_dep)] = str(found_file)
         
         # Aggiorna gli include nel file temporaneo
