@@ -15,31 +15,13 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Preprocess C files in a project')
     parser.add_argument('--project-path', '-p', required=True, help='Path to the C project')
     parser.add_argument('--include-paths', '-i', nargs='+', default=['/usr/include'], help='System include paths')
-    parser.add_argument('--output-dir', '-o', default='preprocessed', help='Output directory')
     return parser.parse_args()
 
-def setup_directories(project_path: str, output_dir: str) -> Tuple[Path, Path]:
+def setup_directories(project_path: str) -> Path:
     """
-    Crea la struttura delle cartelle di output e una directory temporanea.
-    Ritorna (project_out_dir, temp_dir)
+    Crea una directory temporanea.
+    Ritorna temp_dir
     """
-    # Converti i path in oggetti Path
-    project_path = Path(project_path)
-    output_dir = Path(output_dir)
-    
-    # Crea directory di output con il nome del progetto come padre
-    project_name = project_path.name
-    project_out_dir = output_dir / f"{project_name}"
-    
-    # Ricrea la struttura delle cartelle
-    for src_dir in project_path.rglob('*'):
-        if src_dir.is_dir():
-            dst_dir = project_out_dir / src_dir.relative_to(project_path)
-            dst_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Crea anche la directory root del progetto
-    project_out_dir.mkdir(parents=True, exist_ok=True)
-    
     # Crea una directory temporanea con il nome del progetto
     temp_base = Path('/dev/shm')
     temp_dir = None
@@ -49,6 +31,7 @@ def setup_directories(project_path: str, output_dir: str) -> Tuple[Path, Path]:
     while attempt < max_attempts:
         try:
             # Usa il nome del progetto nella directory temporanea
+            project_name = Path(project_path).name
             temp_name = f'preprocessor_{project_name}'
             temp_dir = temp_base / temp_name
             
@@ -71,7 +54,7 @@ def setup_directories(project_path: str, output_dir: str) -> Tuple[Path, Path]:
     if temp_dir is None:
         raise RuntimeError("Failed to create temporary directory after multiple attempts")
     
-    return project_out_dir, temp_dir
+    return temp_dir
 
 def find_c_files(project_path: str) -> List[Path]:
     """Trova tutti i file .c nel progetto usando find."""
@@ -204,17 +187,16 @@ def run_cpp_m(file_path: Path, include_paths: List[Path]) -> Tuple[bool, Optiona
         return False, str(e)
 
 def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path], 
-                   output_dir: Path, temp_dir: Path) -> bool:
+                   temp_dir: Path) -> bool:
     """
     Preprocessa un singolo file C risolvendo le dipendenze mancanti.
+    I file .i e .err vengono salvati nella stessa directory del file .c originale.
     """
     print(f"\nProcessing {c_file.relative_to(project_path)}", flush=True)
     
-    # Setup dei path di output
-    rel_path = c_file.relative_to(project_path)
-    out_path = output_dir / f"{rel_path}.i"
-    err_path = output_dir / f"{rel_path}.err"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Setup dei path di output nella stessa directory del file .c
+    out_path = c_file.with_suffix('.i')
+    err_path = c_file.with_suffix('.err')
     
     # Copia il file .c nella directory temporanea
     temp_file = temp_dir / c_file.name
@@ -296,8 +278,8 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
 def main():
     args = parse_arguments()
     
-    # Setup directories
-    project_out_dir, temp_dir = setup_directories(args.project_path, args.output_dir)
+    # Setup directory temporanea
+    temp_dir = setup_directories(args.project_path)
     
     try:
         # Trova tutti i file .c del progetto
@@ -310,7 +292,7 @@ def main():
         for c_file in c_files:
             if preprocess_file(c_file, Path(args.project_path), 
                             [Path(p) for p in args.include_paths],
-                            project_out_dir, temp_dir):
+                            temp_dir):
                 processed += 1
             else:
                 skipped += 1

@@ -1,18 +1,17 @@
 #!/bin/sh
 
 # Verifica che tutti i parametri richiesti siano stati forniti
-if [ $# -ne 5 ]; then
-    echo "Usage: $0 <output_dir> <log_file> <kernel_source> <project_dir> <arch>"
-    echo "Example: $0 processed preproc.log kernel_sources/linux-5.9.9_arm64 projects/dummy_project arm64"
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <log_file> <kernel_source> <project_dir> <arch>"
+    echo "Example: $0 preproc.log kernel_sources/linux-5.9.9_arm64 projects/dummy_project arm64"
     exit 1
 fi
 
 # Parametri di input
-OUTPUT_DIR="$1"
-LOG_FILE="$2"
-KERNEL_SOURCE="$3"
-PROJECT_DIR="$4"
-ARCH="$5"
+LOG_FILE="$1"
+KERNEL_SOURCE="$2"
+PROJECT_DIR="$3"
+ARCH="$4"
 
 # Verifica che le directory esistano
 if [ ! -d "$KERNEL_SOURCE" ]; then
@@ -24,9 +23,6 @@ if [ ! -d "$PROJECT_DIR" ]; then
     echo "ERROR: Project directory not found: $PROJECT_DIR"
     exit 1
 fi
-
-# Crea la directory di output se non esiste
-mkdir -p "$OUTPUT_DIR"
 
 # Costruisci la stringa dei path di include verificando che esistano
 INCLUDE_PATHS=""
@@ -53,7 +49,6 @@ done
 # Esegui il preprocessore
 echo "Starting preprocessing..."
 echo "Project directory: $PROJECT_DIR"
-echo "Output directory: $OUTPUT_DIR"
 echo "Include paths:"
 for path in $INCLUDE_PATHS; do
     echo "  - $path"
@@ -61,7 +56,6 @@ done
 
 python3 preprocessor_working.py \
     --project-path "$PROJECT_DIR" \
-    --output-dir "$OUTPUT_DIR" \
     --include-paths $INCLUDE_PATHS > "$LOG_FILE" 2>&1
 
 # Controlla il risultato
