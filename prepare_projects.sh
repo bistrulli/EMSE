@@ -38,27 +38,50 @@ fi
 # Crea la directory di destinazione se non esiste
 mkdir -p "$DEST_DIR"
 
+# Contatori per le statistiche
+total=0
+copied=0
+skipped=0
+not_found=0
+
 # Leggi il file riga per riga e copia ogni directory
 while IFS= read -r line; do
     # Salta le righe vuote
     [ -z "$line" ] && continue
     
+    # Incrementa il contatore totale
+    ((total++))
+    
     # Rimuovi eventuali spazi o caratteri speciali
     dir_name=$(echo "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
-    # Costruisci il percorso completo
+    # Costruisci i percorsi completi
     full_path="$BASE_DIR/$dir_name"
+    dest_path="$DEST_DIR/$dir_name"
     
     # Verifica che la directory sorgente esista
     if [ -d "$full_path" ]; then
-        echo "Copying $full_path to $DEST_DIR/"
-        # Usa cp -ar per una copia di sola lettura
-        # -a: archive mode (preserva tutti gli attributi)
-        # -r: recursive (copia le directory ricorsivamente)
-        cp -ar "$full_path" "$DEST_DIR/"
+        # Verifica se la directory di destinazione esiste già
+        if [ -d "$dest_path" ]; then
+            echo "Skipping $dir_name (already exists in $DEST_DIR)"
+            ((skipped++))
+        else
+            echo "Copying $full_path to $DEST_DIR/"
+            # Usa cp -ar per una copia di sola lettura
+            # -a: archive mode (preserva tutti gli attributi)
+            # -r: recursive (copia le directory ricorsivamente)
+            cp -ar "$full_path" "$DEST_DIR/"
+            ((copied++))
+        fi
     else
         echo "WARNING: Directory not found: $full_path"
+        ((not_found++))
     fi
 done < "$INPUT_FILE"
 
-echo "Copy completed!" 
+echo "Copy completed!"
+echo "Statistics:"
+echo "- Total projects processed: $total"
+echo "- Successfully copied: $copied"
+echo "- Skipped (already exist): $skipped"
+echo "- Not found: $not_found" 
