@@ -67,10 +67,10 @@ while IFS= read -r line; do
             ((skipped++))
         else
             echo "Copying $full_path to $DEST_DIR/"
-            # Usa cp -ar per una copia di sola lettura
-            # -a: archive mode (preserva tutti gli attributi)
+            # Usa cp -rp per copiare ricorsivamente e preservare i timestamp
             # -r: recursive (copia le directory ricorsivamente)
-            cp -ar "$full_path" "$DEST_DIR/"
+            # -p: preserve timestamps
+            cp -rp "$full_path" "$DEST_DIR/"
             ((copied++))
         fi
     else
