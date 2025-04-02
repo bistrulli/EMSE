@@ -23,6 +23,18 @@ if [ ! -f "$INPUT_FILE" ]; then
     exit 1
 fi
 
+# Verifica che BASE_DIR e DEST_DIR siano directory diverse
+if [ "$(realpath "$BASE_DIR")" = "$(realpath "$DEST_DIR")" ]; then
+    echo "ERROR: Base directory and destination directory cannot be the same"
+    exit 1
+fi
+
+# Verifica che DEST_DIR non sia una sottodirectory di BASE_DIR
+if [[ "$(realpath "$DEST_DIR")" == "$(realpath "$BASE_DIR")"/* ]]; then
+    echo "ERROR: Destination directory cannot be a subdirectory of base directory"
+    exit 1
+fi
+
 # Crea la directory di destinazione se non esiste
 mkdir -p "$DEST_DIR"
 
@@ -40,6 +52,9 @@ while IFS= read -r line; do
     # Verifica che la directory sorgente esista
     if [ -d "$full_path" ]; then
         echo "Copying $full_path to $DEST_DIR/"
+        # Usa cp -ar per una copia di sola lettura
+        # -a: archive mode (preserva tutti gli attributi)
+        # -r: recursive (copia le directory ricorsivamente)
         cp -ar "$full_path" "$DEST_DIR/"
     else
         echo "WARNING: Directory not found: $full_path"
