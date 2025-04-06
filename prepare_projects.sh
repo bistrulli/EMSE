@@ -38,19 +38,37 @@ fi
 # Crea la directory di destinazione se non esiste
 mkdir -p "$DEST_DIR"
 
+# Conta il numero totale di righe non vuote nel file di input
+total_lines=$(grep -c '[^[:space:]]' "$INPUT_FILE")
+
 # Contatori per le statistiche
-total=0
+current=0
 copied=0
 skipped=0
 not_found=0
+
+# Funzione per aggiornare la barra di progresso
+update_progress() {
+    local current=$1
+    local total=$2
+    local width=50
+    local percentage=$((current * 100 / total))
+    local completed=$((current * width / total))
+    local remaining=$((width - completed))
+    
+    printf "\rProgress: [%${completed}s%${remaining}s] %d%%" "" "" "$percentage"
+}
 
 # Leggi il file riga per riga e copia ogni directory
 while IFS= read -r line; do
     # Salta le righe vuote
     [ -z "$line" ] && continue
     
-    # Incrementa il contatore totale
-    ((total++))
+    # Incrementa il contatore corrente
+    ((current++))
+    
+    # Aggiorna la barra di progresso
+    update_progress "$current" "$total_lines"
     
     # Rimuovi eventuali spazi o caratteri speciali
     dir_name=$(echo "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -63,26 +81,22 @@ while IFS= read -r line; do
     if [ -d "$full_path" ]; then
         # Verifica se la directory di destinazione esiste già
         if [ -d "$dest_path" ]; then
-            echo "Skipping $dir_name (already exists in $DEST_DIR)"
             ((skipped++))
         else
-            echo "Copying $full_path to $DEST_DIR/"
-            # Usa cp -rdp per copiare ricorsivamente, preservare i timestamp e i link simbolici
-            # -r: recursive (copia le directory ricorsivamente)
-            # -d: preserve links (preserva i link simbolici)
-            # -p: preserve timestamps
-            cp -rd --preserve=timestamps --no-preserve=mode "$full_path" "$DEST_DIR/"
+            cp -rdp "$full_path" "$DEST_DIR/"
             ((copied++))
         fi
     else
-        echo "WARNING: Directory not found: $full_path"
         ((not_found++))
     fi
 done < "$INPUT_FILE"
 
+# Aggiungi una nuova linea dopo la barra di progresso
+echo
+
 echo "Copy completed!"
 echo "Statistics:"
-echo "- Total projects processed: $total"
+echo "- Total projects processed: $total_lines"
 echo "- Successfully copied: $copied"
 echo "- Skipped (already exist): $skipped"
 echo "- Not found: $not_found" 
