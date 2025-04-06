@@ -71,7 +71,7 @@ while IFS= read -r line; do
             # -r: recursive (copia le directory ricorsivamente)
             # -d: preserve links (preserva i link simbolici)
             # -p: preserve timestamps
-            cp -rd --preserve=timestamps "$full_path" "$DEST_DIR/"
+            cp -rd --preserve=timestamps --no-preserve=mode "$full_path" "$DEST_DIR/"
             ((copied++))
         fi
     else
