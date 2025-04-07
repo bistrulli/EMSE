@@ -26,6 +26,12 @@ def read_file_lines(file_path):
     with open(file_path, 'r') as f:
         return [line.strip() for line in f if line.strip()]
 
+def sanitize_filename(filename):
+    """Sanitizza il nome del file rimuovendo i caratteri problematici"""
+    # Sostituisce le barre con un separatore sicuro
+    sanitized = filename.replace('/', '__').replace('\\', '__')
+    return sanitized
+
 def main():
     # Parsing degli argomenti
     parser = argparse.ArgumentParser(description='Run preprocessor on multiple projects with different kernel versions')
@@ -69,10 +75,12 @@ def main():
     # Iterazione su ogni progetto e versione del kernel
     for i, project in enumerate(projects):
         project_name = project_relative_paths[i]  # Usiamo il nome relativo per i log
+        sanitized_project_name = sanitize_filename(project_name)
+        
         for kernel_version in kernel_versions:
             # Costruisci i percorsi
             kernel_path = os.path.join(args.kernel_base_dir, kernel_version)
-            log_file = f"preprocessing_logs/{project_name}{kernel_version}.log"
+            log_file = f"preprocessing_logs/{sanitized_project_name}-{kernel_version}.log"
             
             # Verifica che la directory del kernel esista
             if not check_dir_exists(kernel_path):
