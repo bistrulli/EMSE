@@ -72,7 +72,7 @@ def main():
         for kernel_version in kernel_versions:
             # Costruisci i percorsi
             kernel_path = os.path.join(args.kernel_base_dir, kernel_version)
-            log_file = f"preprocessing_logs/{project_name}_{kernel_version}.log"
+            log_file = f"preprocessing_logs/{project_name}{kernel_version}.log"
             
             # Verifica che la directory del kernel esista
             if not check_dir_exists(kernel_path):
@@ -91,10 +91,14 @@ def main():
             # Esegui il preprocessore
             print(f"\nProcessing {project_name} with kernel {kernel_version}")
             
+            # Stampa il comando completo per il debug
+            command = ["./run_preprocessor_working.sh", log_file, kernel_path, project, DEFAULT_ARCH]
+            print(f"Executing command: {' '.join(command)}")
+            
             # Esegui lo script run_preprocessor_working.sh
             try:
                 result = subprocess.run(
-                    ["./run_preprocessor_working.sh", log_file, kernel_path, project, DEFAULT_ARCH],
+                    command,
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
