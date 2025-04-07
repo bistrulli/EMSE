@@ -10,3 +10,6 @@ projects
 *.synctex.gz
 *.tex
 env
+
+kernel_sources
+kernel_sources.zip

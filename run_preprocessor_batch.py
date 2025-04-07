@@ -29,23 +29,31 @@ def read_file_lines(file_path):
 def main():
     # Parsing degli argomenti
     parser = argparse.ArgumentParser(description='Run preprocessor on multiple projects with different kernel versions')
-    parser.add_argument('projects_file', help='File containing project paths')
+    parser.add_argument('projects_file', help='File containing project paths (relative to projects_base_dir)')
     parser.add_argument('kernel_versions_file', help='File containing kernel versions')
     parser.add_argument('kernel_base_dir', help='Base directory for kernel sources')
+    parser.add_argument('projects_base_dir', help='Base directory for projects')
     args = parser.parse_args()
     
     # Verifica che i file di input esistano
     check_file_exists(args.projects_file)
     check_file_exists(args.kernel_versions_file)
     
-    # Verifica che la directory base dei kernel esista
+    # Verifica che le directory base esistano
     if not check_dir_exists(args.kernel_base_dir):
         print(f"ERROR: Kernel base directory not found: {args.kernel_base_dir}")
         sys.exit(1)
     
+    if not check_dir_exists(args.projects_base_dir):
+        print(f"ERROR: Projects base directory not found: {args.projects_base_dir}")
+        sys.exit(1)
+    
     # Leggi i file di input
-    projects = read_file_lines(args.projects_file)
+    project_relative_paths = read_file_lines(args.projects_file)
     kernel_versions = read_file_lines(args.kernel_versions_file)
+    
+    # Costruisci i percorsi completi dei progetti
+    projects = [os.path.join(args.projects_base_dir, p) for p in project_relative_paths]
     
     # Crea la directory per i log se non esiste
     os.makedirs("preprocessing_logs", exist_ok=True)
@@ -59,11 +67,12 @@ def main():
     pbar = tqdm(total=total_tasks, desc="Processing", unit="task")
     
     # Iterazione su ogni progetto e versione del kernel
-    for project in projects:
+    for i, project in enumerate(projects):
+        project_name = project_relative_paths[i]  # Usiamo il nome relativo per i log
         for kernel_version in kernel_versions:
             # Costruisci i percorsi
             kernel_path = os.path.join(args.kernel_base_dir, kernel_version)
-            log_file = f"preprocessing_logs/{os.path.basename(project)}_{kernel_version}.log"
+            log_file = f"preprocessing_logs/{project_name}_{kernel_version}.log"
             
             # Verifica che la directory del kernel esista
             if not check_dir_exists(kernel_path):
@@ -80,7 +89,7 @@ def main():
                 continue
             
             # Esegui il preprocessore
-            print(f"\nProcessing {project} with kernel {kernel_version}")
+            print(f"\nProcessing {project_name} with kernel {kernel_version}")
             
             # Esegui lo script run_preprocessor_working.sh
             try:
@@ -94,7 +103,7 @@ def main():
                 print(result.stdout)
                 successful += 1
             except subprocess.CalledProcessError as e:
-                print(f"ERROR while processing {project} with {kernel_version}:")
+                print(f"ERROR while processing {project_name} with {kernel_version}:")
                 print(e.stderr)
                 failed += 1
             
