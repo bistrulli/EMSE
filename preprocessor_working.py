@@ -490,7 +490,7 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
     # path_map = {str(temp_file): str(c_file)}
     
     dependency_count = 0
-    max_iterations = 10000 # Rinominato da max_dependencies
+    max_iterations = 1000 # Rinominato da max_dependencies
     files_updated_in_iteration = set()
 
     while dependency_count < max_iterations:
