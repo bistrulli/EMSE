@@ -481,7 +481,7 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
     logger.debug(f"Temp file: {temp_file}")
 
     dependency_count = 0
-    max_iterations = 5000
+    max_iterations = 2000
     files_updated_in_iteration = set()
 
     while dependency_count < max_iterations:
