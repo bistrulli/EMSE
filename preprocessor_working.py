@@ -430,7 +430,9 @@ def clean_temp_directory(temp_dir: Path, debug: bool = False) -> None:
         logger.warning(f"Failed to clean temporary directory: {e}")
 
 def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path], 
-                   temp_dir: Path, file_map: Dict[str, List[Path]], debug: bool = False) -> bool:
+                   temp_dir: Path, file_map: Dict[str, List[Path]], 
+                   temp_to_original_map: Dict[str, str],  # Aggiunto parametro
+                   debug: bool = False) -> bool:
     """
     Preprocessa un singolo file C risolvendo le dipendenze mancanti.
     I file .i e .err vengono salvati nella stessa directory del file .c originale.
@@ -440,6 +442,7 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         include_paths: Percorsi di include standard (meno usati per lookup).
         temp_dir: Directory temporanea.
         file_map: Mappa precalcolata {nome_base: [lista_path]}.
+        temp_to_original_map: Mappa condivisa {temp_path: original_path}. # Aggiunto
         debug: Flag per logging di debug.
     Returns:
         True se successo, False altrimenti.
@@ -461,9 +464,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
     logger.debug(f"  .i file: {out_path}")
     logger.debug(f"  .err file: {err_path}")
     
-    # Dizionario per mappare i path temporanei ai path originali assoluti
-    temp_to_original_map: Dict[str, str] = {}
-
     # Copia il file .c nella directory temporanea
     copy_start_time = time.time()
     try:
@@ -502,7 +502,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         missing_info = extract_missing_info(err_msg, debug)
         if missing_info is None:
             logger.error(f"Failed: preprocessing error (could not extract missing info)")
-            if err_msg: err_path.write_text(err_msg)
             return False
         
         missing_file, is_system, includer_file_path_str = missing_info
@@ -513,7 +512,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         # Non gestiamo più gli include di sistema in questo modo, potrebbero richiedere -I forniti
         if is_system:
             logger.error(f"Failed: missing system dependency <{missing_file}>. Ensure correct system include paths are provided via -I to cpp eventually.")
-            if err_msg: err_path.write_text(err_msg)
             return False
         
         # 1. Trova il file sorgente originale per il file mancante USANDO LA MAPPA
@@ -543,7 +541,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
             
         if not found_source_file:
             logger.error(f'Failed: missing project dependency "{missing_file}" not found in pre-built map.')
-            if err_msg: err_path.write_text(err_msg)
             return False
             
         # 2. Copia il file trovato nella directory temporanea (logica invariata)
@@ -571,7 +568,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
                 logger.debug(f"  Mapped temp '{temp_dependency_path}' to original '{found_source_file.resolve()}'")
             except Exception as e:
                 logger.error(f"Failed: Error copying dependency {found_source_file.name} to temp dir: {e}")
-                if err_msg: err_path.write_text(err_msg + f"\nError copying dependency: {e}")
                 return False
             copy_dep_end = time.time()
             logger.debug(f"Dependency copy took {copy_dep_end - copy_dep_start:.6f} seconds")
@@ -591,7 +587,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
                  f"within the temporary directory '{temp_dir}' to update include for '{missing_file_base_name}'."
              )
              logger.error(error_msg)
-             if err_msg: err_path.write_text(err_msg + "\n" + error_msg)
              return False
         
         # 4. Aggiorna gli include nel file identificato (logica invariata)
@@ -604,7 +599,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
     # Fine del loop while (logica invariata)
     if dependency_count >= max_iterations:
         logger.error(f"Failed: Maximum dependency resolution iterations ({max_iterations}) reached.")
-        if err_msg: err_path.write_text(err_msg + f"\nMaximum iterations reached.")
         return False
 
     # Se siamo usciti dal loop con successo, esegui cpp -E finale
@@ -635,7 +629,6 @@ def preprocess_file(c_file: Path, project_path: Path, include_paths: List[Path],
         return True
     else:
         logger.error(f"Failed: final preprocessing step (cpp -E) failed after {total_duration:.2f} seconds")
-        if final_err: err_path.write_text(final_err)
         return False
 
 def get_project_path(args):
@@ -701,8 +694,8 @@ def maybe_clean_temp_directory(temp_dir, clean_temp, file_count, debug=False):
             if file.is_file():
                 file.unlink()
 
-def process_file_with_logging(index, total, c_file, project_path, include_paths, temp_dir, file_map, debug):
-    # Aggiunto file_map come argomento
+def process_file_with_logging(index, total, c_file, project_path, include_paths, temp_dir, file_map, temp_to_original_map, debug):
+    # Aggiunto file_map e temp_to_original_map come argomenti
     """Processa un singolo file con gestione appropriata del logging.
     
     Args:
@@ -713,6 +706,7 @@ def process_file_with_logging(index, total, c_file, project_path, include_paths,
         include_paths: Lista dei percorsi per include
         temp_dir: Directory temporanea
         file_map: Mappa pre-calcolata {nome_base: [lista_path]}.
+        temp_to_original_map: Mappa condivisa {temp_path: original_path}. # Aggiunto
         debug: Flag per il livello di debug
         
     Returns:
@@ -722,8 +716,8 @@ def process_file_with_logging(index, total, c_file, project_path, include_paths,
     logger.debug(f"\n=== Processing file {index+1}/{total} ===")
     
     try:
-        # Passa file_map a preprocess_file
-        return preprocess_file(c_file, project_path, include_paths, temp_dir, file_map, debug)
+        # Passa file_map e temp_to_original_map a preprocess_file
+        return preprocess_file(c_file, project_path, include_paths, temp_dir, file_map, temp_to_original_map, debug)
     except Exception as e:
         logger.error(f"Error processing file: {e}")
         if debug:
@@ -732,8 +726,8 @@ def process_file_with_logging(index, total, c_file, project_path, include_paths,
             logger.debug(traceback.format_exc())
         return False
 
-def process_files(files_to_process, project_path, include_paths, temp_dir, file_map, clean_temp=False, debug=False):
-    # Aggiunto file_map come argomento
+def process_files(files_to_process, project_path, include_paths, temp_dir, file_map, temp_to_original_map, clean_temp=False, debug=False):
+    # Aggiunto file_map e temp_to_original_map come argomenti
     """Esegue il preprocessing di tutti i file nella lista.
     
     Args:
@@ -742,6 +736,7 @@ def process_files(files_to_process, project_path, include_paths, temp_dir, file_
         include_paths: Lista dei percorsi per include (meno usati ora)
         temp_dir: Directory temporanea
         file_map: Mappa pre-calcolata {nome_base: [lista_path]}.
+        temp_to_original_map: Mappa condivisa {temp_path: original_path}. # Aggiunto
         clean_temp: Se True, pulisce la directory temp dopo ogni file
         debug: Flag per attivare output di debug dettagliato
         
@@ -759,9 +754,9 @@ def process_files(files_to_process, project_path, include_paths, temp_dir, file_
     
     # Processa ogni file
     for i, c_file in enumerate(files_to_process):
-        # Passa file_map a process_file_with_logging
+        # Passa file_map e temp_to_original_map a process_file_with_logging
         success = process_file_with_logging(
-            i, total_files, c_file, project_path, include_paths, temp_dir, file_map, debug
+            i, total_files, c_file, project_path, include_paths, temp_dir, file_map, temp_to_original_map, debug
         )
         
         # Aggiorna contatori
@@ -915,6 +910,9 @@ def main():
     
     logger.debug(f"Created temporary directory: {temp_dir}")
     
+    # *** AGGIUNTA: Inizializza la mappa condivisa qui ***
+    temp_to_original_map: Dict[str, str] = {}
+
     try:
         # Preprocessa i file
         processed, skipped = process_files(
@@ -922,7 +920,8 @@ def main():
             project_path, 
             args.include_paths, 
             temp_dir, 
-            file_map, # Passa la mappa qui
+            file_map, # Passa la mappa dei file
+            temp_to_original_map, # Passa la mappa dei percorsi condivisa
             args.clean_temp, 
             log_level <= logging.DEBUG
         )
